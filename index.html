@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>SoFi-Tracker 2026 · Sonnenfinsternis am 12. August</title>
+<meta name="description" content="Sonnenfinsternis am 12. August 2026: Berechne für deinen Standort, wann welche Phase eintritt, wie viel Prozent der Sonne bedeckt sind und wo am Himmel du hinschauen musst.">
+<meta name="theme-color" content="#04060f">
+<meta name="color-scheme" content="dark">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="SoFi 2026">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='38' fill='%23ffb347'/><circle cx='68' cy='38' r='34' fill='%2304060f'/></svg>">
+<link rel="stylesheet" href="assets/css/style.css">
+</head>
+<body>
+
+<div class="bg-layer"></div>
+<div class="bg-grid"></div>
+<canvas id="starfield"></canvas>
+
+<div class="wrap">
+
+  <header class="top">
+    <p class="eyebrow">Mittwoch · 12. August 2026</p>
+    <h1>Sonnenfinsternis<br>Tracker</h1>
+    <p class="subtitle">Deine Finsternis, auf die Sekunde genau für deinen Standort</p>
+  </header>
+
+  <!-- ============ Countdown ============ -->
+  <section class="card countdown-card">
+    <div class="countdown-label" id="cdLabel">Bis zum Beginn an deinem Ort</div>
+    <div class="countdown" id="countdown">
+      <div class="cd-unit"><div class="cd-value" id="cdD">--</div><div class="cd-label">Tage</div></div>
+      <div class="cd-unit"><div class="cd-value" id="cdH">--</div><div class="cd-label">Std</div></div>
+      <div class="cd-unit"><div class="cd-value" id="cdM">--</div><div class="cd-label">Min</div></div>
+      <div class="cd-unit"><div class="cd-value" id="cdS">--</div><div class="cd-label">Sek</div></div>
+    </div>
+  </section>
+
+  <!-- ============ Standort ============ -->
+  <section class="card">
+    <h2>Dein Standort</h2>
+    <div class="loc-row">
+      <div class="search-wrap">
+        <input type="text" id="citySearch" placeholder="Stadt suchen…"
+               autocomplete="off" autocorrect="off" spellcheck="false"
+               aria-label="Stadt suchen">
+        <div class="suggestions" id="suggestions" role="listbox"></div>
+      </div>
+      <button class="btn" id="btnGeo" type="button">📍 GPS</button>
+    </div>
+
+    <div class="notice notice-warn hidden" id="geoError" style="margin-top:12px"></div>
+
+    <div class="loc-current">
+      <strong id="locName">—</strong>
+      <span class="loc-coords" id="locCoords"></span>
+    </div>
+
+    <details style="margin-top:14px">
+      <summary style="cursor:pointer;font-size:12.5px;color:var(--text-faint)">Koordinaten von Hand eingeben</summary>
+      <div class="loc-row" style="margin-top:12px">
+        <input type="number" id="inLat" placeholder="Breite z. B. 50.9375" step="0.0001" inputmode="decimal" aria-label="Breitengrad">
+        <input type="number" id="inLon" placeholder="Länge z. B. 6.9603" step="0.0001" inputmode="decimal" aria-label="Längengrad">
+        <input type="number" id="inAlt" placeholder="Höhe m" step="1" inputmode="numeric" aria-label="Höhe in Metern" style="max-width:110px">
+        <button class="btn btn-ghost" id="btnManual" type="button">Setzen</button>
+      </div>
+    </details>
+  </section>
+
+  <div id="resultArea" class="hidden">
+
+    <!-- ============ Ergebnis ============ -->
+    <div class="verdict" id="verdict">
+      <div class="big" id="verdictBig">—</div>
+      <div class="big-sub" id="verdictSub"></div>
+    </div>
+
+    <div id="notices"></div>
+
+    <!-- ============ Simulation + Slider ============ -->
+    <section class="card">
+      <h2>Zeitreise durch die Finsternis</h2>
+
+      <div class="stage">
+        <canvas id="sunCanvas"></canvas>
+        <div class="stage-overlay">
+          <div class="stage-time" id="stageTime">--:--:--</div>
+          <div class="stage-tz" id="stageTz"></div>
+        </div>
+      </div>
+
+      <div class="slider-block">
+        <input type="range" id="timeSlider" min="0" max="1000" value="500"
+               aria-label="Uhrzeit wählen">
+        <div class="slider-marks" id="sliderMarks"></div>
+
+        <div class="readout">
+          <div class="ro"><div class="ro-val" id="roObsc">–</div><div class="ro-lab">bedeckt</div></div>
+          <div class="ro"><div class="ro-val" id="roAlt">–</div><div class="ro-lab">Sonnenhöhe</div></div>
+          <div class="ro"><div class="ro-val" id="roAz">–</div><div class="ro-lab">Richtung</div></div>
+        </div>
+
+        <div class="slider-controls">
+          <button class="btn" id="btnNow" type="button">⏱ Jetzt</button>
+          <button class="btn" id="btnMax" type="button">☀ Maximum</button>
+          <button class="btn" id="btnPlay" type="button">▶ Ablauf</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ Phasen ============ -->
+    <section class="card">
+      <h2>Ablauf an deinem Ort</h2>
+      <div class="phases" id="phases"></div>
+      <p style="font-size:11.5px;color:var(--text-faint);margin:12px 0 0">
+        Tipp: Auf eine Phase tippen, um im Zeitregler dorthin zu springen.
+      </p>
+    </section>
+
+    <!-- ============ Wohin schauen ============ -->
+    <section class="card">
+      <h2>Wohin du schauen musst</h2>
+      <div class="horizon-wrap">
+        <canvas id="horizonCanvas"></canvas>
+      </div>
+      <p style="font-size:12px;color:var(--text-dim);margin:12px 0 0;line-height:1.55">
+        Die gestrichelte Linie ist der Weg der Sonne über den Himmel, während die Finsternis läuft.
+        Unten stehen die Himmelsrichtungen, links die Höhe über dem Horizont – eine Faustregel:
+        eine ausgestreckte Faust entspricht etwa 10°.
+      </p>
+    </section>
+
+    <!-- ============ Kennzahlen ============ -->
+    <section class="card">
+      <h2>Kennzahlen</h2>
+      <div class="grid2" id="statGrid"></div>
+      <div class="slider-controls" style="margin-top:14px">
+        <button class="btn btn-ghost" id="btnIcs" type="button">📅 In den Kalender</button>
+        <button class="btn btn-ghost" id="btnShare" type="button">↗ Teilen</button>
+      </div>
+    </section>
+
+  </div>
+
+  <!-- ============ Beobachtungstipps ============ -->
+  <details class="card">
+    <summary>Beobachtungstipps</summary>
+    <ul class="tips">
+      <li><strong>Brille zuerst.</strong> Nur zertifizierte SoFi-Brillen nach EN&nbsp;ISO&nbsp;12312-2.
+          Vor Gebrauch gegen eine helle Lampe halten: Kratzer oder Löcher machen sie unbrauchbar.</li>
+      <li><strong>Niemals durch Fernglas, Kamera oder Teleskop</strong> ohne speziellen Objektivfilter –
+          auch nicht mit SoFi-Brille. Die gebündelte Strahlung zerstört Filter und Auge in Sekunden.</li>
+      <li><strong>Freie Sicht nach Westen.</strong> Die Sonne steht bei uns tief. Suche dir vorher
+          einen Platz mit offenem Horizont – Feld, Hügel, Deich, Hochhausdach.</li>
+      <li><strong>Projektion statt Blick:</strong> Ein Loch in Pappe wirft ein Bild der angebissenen
+          Sonne auf den Boden. Auch das Blattwerk von Bäumen macht das ganz von allein – hunderte
+          Sonnensicheln als Schattenmuster.</li>
+      <li><strong>Fotografieren:</strong> Handy-Kamera nur mit Filterfolie vor der Linse. Ohne Filter
+          wird der Sensor beschädigt. Schöner ist oft das Weitwinkelbild mit Landschaft und Menschen.</li>
+      <li><strong>Achte auf die Umgebung:</strong> Licht wird fahl und metallisch, Schatten werden
+          scharf, die Temperatur fällt spürbar, Vögel verstummen. Das erlebt man nur, wenn man
+          zwischendurch <em>nicht</em> zur Sonne schaut.</li>
+      <li><strong>Wetter checken</strong> – und bereit sein, 50&nbsp;km zu fahren. Ein Loch in der
+          Wolkendecke ist mehr wert als jeder perfekte Beobachtungsplatz.</li>
+    </ul>
+  </details>
+
+  <!-- ============ Hintergrund ============ -->
+  <details class="card">
+    <summary>Was passiert da eigentlich?</summary>
+    <ul class="tips">
+      <li>Der Mond schiebt sich zwischen Erde und Sonne. Sein Kernschatten ist nur rund
+          290&nbsp;km breit und rast mit mehreren tausend km/h über die Erde.</li>
+      <li>Am 12.&nbsp;August 2026 läuft dieser Kernschatten über <strong>Grönland, Island und
+          Nordspanien</strong>. Nur dort wird es für kurze Zeit richtig dunkel.</li>
+      <li>Mitteleuropa liegt im Halbschatten: Wir sehen eine <strong>partielle</strong>
+          Finsternis mit 80–90&nbsp;% Bedeckung – kurz vor Sonnenuntergang.</li>
+      <li>Auch bei 90&nbsp;% bleibt es erstaunlich hell. Unser Auge gleicht Helligkeits­unterschiede
+          logarithmisch aus. Erst ab etwa 99&nbsp;% wird es dämmrig.</li>
+      <li>Die nächste <em>totale</em> Sonnenfinsternis in Deutschland ist am
+          <strong>3.&nbsp;September 2081</strong>. Die von 2026 ist die stärkste partielle
+          Finsternis hierzulande seit 1999.</li>
+    </ul>
+  </details>
+
+  <!-- ============ Genauigkeit ============ -->
+  <details class="card">
+    <summary>Wie genau ist das hier?</summary>
+    <ul class="tips">
+      <li>Die Berechnung nutzt die <strong>Besselschen Elemente</strong> der NASA
+          (Five Millennium Canon of Solar Eclipses, Espenak/Meeus) und das Standardverfahren
+          für örtliche Umstände. Alles läuft offline auf deinem Gerät.</li>
+      <li>Gegenprobe: Für Köln liefert der Tracker 88,1&nbsp;% Bedeckung mit Maximum um
+          20:12:39&nbsp;MESZ – das DLR gibt 88,3&nbsp;% und „gegen 20:13" an.
+          Für Freiburg 90,1&nbsp;% (veröffentlicht: 90&nbsp;%), für Berlin 84,7&nbsp;% (85&nbsp;%).</li>
+      <li>Kontaktzeiten stimmen damit typischerweise auf <strong>wenige Sekunden</strong>,
+          Bedeckungsgrade auf etwa <strong>0,3&nbsp;Prozentpunkte</strong>.</li>
+      <li>Auch mitten in der Totalitätszone passt es: Für Burgos ergibt der Tracker 101&nbsp;s
+          Totalität mit Maximum um 20:29:08&nbsp;MESZ – veröffentlicht sind „rund 104&nbsp;s"
+          und „20:29".</li>
+      <li>Unschärfer wird es <em>direkt am Rand</em> der Totalitätszone: Dort entscheiden wenige
+          Kilometer, und das echte Bergprofil des Mondrandes verschiebt die Grenze zusätzlich.
+          Orte wie Bilbao oder Reykjavík liegen genau auf dieser Kante – dort weichen auch
+          professionelle Quellen voneinander ab. Für eine Reise dorthin lieber zusätzlich eine
+          Spezialkarte mit Randprofil ansehen.</li>
+      <li>Verwendet wird ΔT&nbsp;=&nbsp;75,4&nbsp;s. Die Höhe über dem Meer geht in die
+          Rechnung ein – bei Bergstationen lohnt es sich, sie einzutragen.</li>
+    </ul>
+  </details>
+
+  <footer>
+    Berechnet nach den Besselschen Elementen der NASA/GSFC · alle Zeiten in der Zeitzone deines Ortes<br>
+    Diese Seite funktioniert ohne Internet – einmal geladen, bleibt sie offline nutzbar.<br>
+    <strong style="color:var(--danger)">Nie ohne zertifizierten Filter in die Sonne schauen.</strong>
+  </footer>
+
+</div>
+
+<script src="assets/js/eclipse-core.js"></script>
+<script src="assets/js/cities.js"></script>
+<script src="assets/js/app.js"></script>
+</body>
+</html>

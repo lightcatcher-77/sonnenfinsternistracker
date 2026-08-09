@@ -1,0 +1,32 @@
+{
+  "name": "SoFi-Tracker 2026",
+  "short_name": "SoFi 2026",
+  "description": "Sonnenfinsternis am 12. August 2026 – örtliche Zeiten, Bedeckungsgrad und Sonnenstand für deinen Standort.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#04060f",
+  "theme_color": "#04060f",
+  "lang": "de",
+  "icons": [
+    {
+      "src": "assets/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "assets/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "assets/icon-maskable.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

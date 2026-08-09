@@ -63,6 +63,7 @@
     ['Konstanz', 'DE', 47.6603, 9.1758, 405, DE],
     ['Flensburg', 'DE', 54.7937, 9.4469, 18, DE],
     ['Garmisch-Partenkirchen', 'DE', 47.4917, 11.0955, 708, DE],
+    ['Füssen', 'DE', 47.5709, 10.6977, 800, DE],
     ['Sylt (List)', 'DE', 55.0180, 8.4390, 5, DE],
     ['Norderney', 'DE', 53.7080, 7.1550, 4, DE],
     ['Helgoland', 'DE', 54.1810, 7.8850, 30, DE],

@@ -8,6 +8,9 @@
   var EL = EC.ELEMENTS_2026;
   var DEG = Math.PI / 180;
 
+  // Startort beim ersten Aufruf, solange nichts gespeichert ist
+  var DEFAULT_CITY = 'Füssen';
+
   var state = {
     place: null,       // {name, lat, lon, height, tz, source}
     circ: null,        // oertliche Umstaende
@@ -1127,10 +1130,10 @@
       if (saved.source === 'city') $('citySearch').value = saved.name;
     } else {
       // Sinnvoller Startwert, bis der Nutzer waehlt
-      var berlin = window.Cities.all[0];
+      var start = window.Cities.search(DEFAULT_CITY, 1)[0] || window.Cities.all[0];
       setPlace({
-        name: berlin.name, lat: berlin.lat, lon: berlin.lon,
-        height: berlin.height, tz: berlin.tz, source: 'default'
+        name: start.name, lat: start.lat, lon: start.lon,
+        height: start.height, tz: start.tz, source: 'default'
       });
       $('citySearch').value = '';
     }

@@ -3,7 +3,7 @@
  * Wichtig fuer den Finsternistag selbst: draussen auf dem Feld ist das Netz
  * oft ueberlastet, die App muss trotzdem laufen.
  */
-var CACHE = 'sofi2026-v1';
+var CACHE = 'sofi2026-v2';
 
 var ASSETS = [
   './',
@@ -13,7 +13,9 @@ var ASSETS = [
   './assets/js/cities.js',
   './assets/js/app.js',
   './manifest.webmanifest',
-  './assets/icon.svg'
+  './assets/icon.svg',
+  './assets/icon-180.png',
+  './assets/icon-192.png'
 ];
 
 self.addEventListener('install', function (e) {

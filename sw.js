@@ -12,7 +12,8 @@ var ASSETS = [
   './assets/js/eclipse-core.js',
   './assets/js/cities.js',
   './assets/js/app.js',
-  './manifest.webmanifest'
+  './manifest.webmanifest',
+  './assets/icon.svg'
 ];
 
 self.addEventListener('install', function (e) {

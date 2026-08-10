@@ -931,6 +931,8 @@ footer a { color: var(--text-dim); }
 }
 .vis-dist { color: var(--text-faint); font-size: 11.5px; }
 .vis-cover { color: var(--cyan); font-weight: 700; }
+.vis-n { color: var(--text-faint); font-size: 10.5px; font-weight: 400; white-space: nowrap; }
+.vis-max { color: var(--text-faint); font-size: 10.5px; font-weight: 400; }
 
 .vis-foot {
   margin: 12px 0 0;

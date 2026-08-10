@@ -748,11 +748,30 @@
 
   function netError(box, err, btnId, label) {
     resetBtn(btnId, label);
-    box.innerHTML = '<div class="notice notice-warn"><span class="notice-icon">📡</span>' +
-      '<div>Die Wetterdaten konnten nicht geladen werden – dafür braucht es Internet. ' +
-      'Alles andere auf dieser Seite funktioniert auch ohne.' +
-      '<br><span class="vis-err">' + escapeHTML(err && err.message ? err.message : err) +
-      '</span></div></div>';
+    var msg = err && err.message ? err.message : String(err);
+
+    /*
+     * Open-Meteos freies Kontingent (10.000 Abrufe pro Tag und IP-Adresse)
+     * meldet sich mit HTTP 429. Das ist kein Netzproblem - wer dann "du
+     * brauchst Internet" liest, sucht den Fehler an der falschen Stelle.
+     */
+    var icon = '📡';
+    var text = 'Die Wetterdaten konnten nicht geladen werden – dafür braucht es Internet. ' +
+      'Alles andere auf dieser Seite funktioniert auch ohne.';
+    if (/\b429\b/.test(msg)) {
+      icon = '⏳';
+      text = 'Der Wetterdienst hat vorerst dichtgemacht: Das kostenlose Kontingent von ' +
+        'Open-Meteo ist für deine Internetverbindung erschöpft. Es füllt sich von selbst ' +
+        'wieder auf – in ein paar Minuten noch einmal versuchen.';
+    } else if (/\b5\d\d\b/.test(msg)) {
+      icon = '🛠';
+      text = 'Der Wetterdienst hat gerade eine Störung. Das liegt nicht an dir – ' +
+        'später noch einmal versuchen.';
+    }
+
+    box.innerHTML = '<div class="notice notice-warn"><span class="notice-icon">' + icon +
+      '</span><div>' + text +
+      '<br><span class="vis-err">' + escapeHTML(msg) + '</span></div></div>';
   }
 
   function loadVisibility() {
@@ -816,15 +835,24 @@
     h += '<div class="vis-rows">';
     (r.lineOfSight || []).forEach(function (p) {
       var cover = p.cover == null ? '–' : Math.round(p.cover) + ' %';
-      var dist = isFinite(p.rawDistanceKm)
-        ? Math.round(p.distanceKm) + ' km' + (p.capped ? '+' : '') : '–';
-      h += '<div class="vis-row"><span class="vis-layer">' + p.layer.label + '</span>' +
+      if (p.maxCover != null && Math.round(p.maxCover) > Math.round(p.cover)) {
+        cover += ' <span class="vis-max">(max ' + Math.round(p.maxCover) + ')</span>';
+      }
+      var dist = p.samples
+        ? Math.round(p.fromKm) + '–' + Math.round(p.toKm) + ' km' + (p.capped ? '+' : '')
+        : '–';
+      h += '<div class="vis-row"><span class="vis-layer">' + p.layer.label +
+        (p.samples ? ' <span class="vis-n">' + p.samples + ' Punkte</span>' : '') + '</span>' +
         '<span class="vis-dist">' + dist + '</span>' +
         '<span class="vis-cover">' + cover + '</span></div>';
     });
     h += '</div><div class="prof-wrap"><canvas id="profCanvas"></canvas></div>';
-    h += '<p class="vis-foot">Seitenansicht: der Sehstrahl vom Beobachter (links) zur Sonne, ' +
-      'und wo er die drei Wolkenstockwerke durchstößt.</p>';
+    h += '<p class="vis-foot">Seitenansicht: der Sehstrahl vom Beobachter (links) zur Sonne. ' +
+      'Abgefragt wird die Bewölkung an ' + (r.samplePoints || 0) + ' Punkten entlang der ' +
+      'Sichtlinie – jeder in dem Stockwerk, in dem der Strahl dort verläuft. Gewertet wird ' +
+      'je Stockwerk die schlechteste Stelle (85er-Perzentil), nicht der Durchschnitt.' +
+      (r.rayCapped ? ' Der Strahl war bei 300 km noch unter der Wolkenobergrenze – das ' +
+        'oberste Stück bleibt ungeprüft.' : '') + '</p>';
 
     // --- Verlauf ---
     h += '<h3 class="vis-h3">Verlauf der Sichtchance</h3>';
@@ -875,7 +903,7 @@
       h += '</div>';
     }
 
-    h += '<p class="vis-foot">Bewölkung am Durchstoßpunkt jeder Schicht, stündlich ' +
+    h += '<p class="vis-foot">Bewölkung entlang der Sichtlinie, stündlich ' +
       'interpoliert. Quelle: Open-Meteo.</p>';
     return h;
   }
@@ -892,29 +920,49 @@
     var ctx = prepCanvas(canvas, W, H);
 
     var los = r.lineOfSight || [];
+    var profile = r.rayProfile || [];
     var maxKm = 0;
-    los.forEach(function (l) { maxKm = Math.max(maxKm, l.distanceKm); });
+    profile.forEach(function (p) { maxKm = Math.max(maxKm, p.distanceKm); });
+    los.forEach(function (l) { if (l.toKm) maxKm = Math.max(maxKm, l.toKm); });
     maxKm = Math.max(maxKm * 1.1, 40);
-    var maxH = 12; // km
+    var maxH = 16; // km
 
     var padL = 34, padR = 12, padT = 10, padB = 24;
     var pw = W - padL - padR, ph = H - padT - padB;
     var X = function (km) { return padL + pw * (km / maxKm); };
     var Y = function (km) { return padT + ph * (1 - km / maxH); };
 
-    // Wolkenstockwerke als Baender, Deckkraft nach Bedeckungsgrad
-    var bands = [[0, 3, 'low'], [3, 8, 'mid'], [8, 12, 'high']];
+    // Stockwerksgrenzen nur als schwache Linien - die Farbe kommt aus dem Profil
+    var bands = [[0, 3, 'tief'], [3, 8, 'mittel'], [8, 16, 'hoch']];
     bands.forEach(function (b) {
-      var entry = null;
-      los.forEach(function (l) { if (l.layer.key === b[2]) entry = l; });
-      var cover = entry && entry.cover != null ? entry.cover / 100 : 0;
-      ctx.fillStyle = 'rgba(170, 200, 240,' + (0.06 + cover * 0.42).toFixed(3) + ')';
+      ctx.fillStyle = 'rgba(170,200,240,0.05)';
       ctx.fillRect(padL, Y(b[1]), pw, Y(b[0]) - Y(b[1]));
+      ctx.strokeStyle = 'rgba(120,160,230,0.18)';
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(padL, Y(b[1])); ctx.lineTo(W - padR, Y(b[1])); ctx.stroke();
       ctx.fillStyle = 'rgba(150,175,215,0.75)';
       ctx.font = '9px ui-monospace, monospace';
       ctx.textAlign = 'left';
-      ctx.fillText(entry ? entry.layer.shortLabel : '', padL + 4, Y(b[1]) + 11);
+      ctx.fillText(b[2], padL + 4, Y(b[1]) + 11);
     });
+
+    /*
+     * Das eigentliche Wolkenprofil: je Stuetzpunkt ein Balken, der die Hoehe
+     * seines Stockwerks fuellt und dessen Deckkraft der Bewoelkung dort
+     * entspricht. So sieht man, wo entlang des Strahls die Wolken stehen.
+     */
+    if (profile.length > 1) {
+      var stepPx = Math.max(2, X(profile[1].distanceKm) - X(profile[0].distanceKm));
+      profile.forEach(function (p) {
+        if (p.cover == null) return;
+        var c = Math.max(0, Math.min(100, p.cover)) / 100;
+        if (c <= 0.01) return;
+        var top = Y(p.layer.maxM / 1000), bot = Y(p.layer.minM / 1000);
+        ctx.fillStyle = (c > 0.5 ? 'rgba(255,120,150,' : 'rgba(120,200,255,') +
+          (0.10 + c * 0.60).toFixed(3) + ')';
+        ctx.fillRect(X(p.distanceKm) - stepPx / 2, top, stepPx, bot - top);
+      });
+    }
 
     // Boden
     ctx.strokeStyle = 'rgba(120,160,230,0.45)';
@@ -938,15 +986,17 @@
     ctx.stroke();
     ctx.setLineDash([]);
 
-    // Durchstosspunkte
+    // Je Stockwerk die gewertete Stelle markieren - das ist die Zahl aus der Tabelle
     los.forEach(function (l) {
-      var x = X(l.distanceKm), y = Y(l.layer.heightM / 1000);
-      ctx.fillStyle = l.cover != null && l.cover > 50 ? '#ff5c7a' : '#4ee1ff';
-      ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2); ctx.fill();
+      if (!l.samples || l.cover == null) return;
+      var mid = (l.fromKm + l.toKm) / 2;
+      var x = X(mid), y = Y(l.layer.heightM / 1000);
+      ctx.fillStyle = l.cover > 50 ? '#ff5c7a' : '#4ee1ff';
+      ctx.beginPath(); ctx.arc(x, y, 3.5, 0, Math.PI * 2); ctx.fill();
       ctx.fillStyle = 'rgba(232,238,255,0.9)';
       ctx.font = '9px ui-monospace, monospace';
       ctx.textAlign = 'center';
-      ctx.fillText(l.cover == null ? '–' : Math.round(l.cover) + '%', x, y - 8);
+      ctx.fillText(Math.round(l.cover) + '%', x, y - 7);
     });
 
     // Beobachter
@@ -957,7 +1007,7 @@
     ctx.fillStyle = 'rgba(150,175,215,0.8)';
     ctx.font = '9px ui-monospace, monospace';
     ctx.textAlign = 'right';
-    ctx.fillText('12 km', padL - 5, Y(12) + 8);
+    ctx.fillText('16 km', padL - 5, Y(16) + 8);
     ctx.fillText('0', padL - 5, Y(0) + 3);
     ctx.textAlign = 'center';
     ctx.fillText(Math.round(maxKm) + ' km', W - padR - 14, H - 8);

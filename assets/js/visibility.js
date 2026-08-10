@@ -35,17 +35,47 @@
   /*
    * Die drei Wolkenstockwerke, wie Open-Meteo sie liefert.
    *
-   * heightM ist die repraesentative Hoehe der Schicht (tief bis 3 km,
-   * mittelhoch 3-8 km, hoch darueber). opacity ist die Wahrscheinlichkeit,
-   * dass eine Wolke dieser Gattung die Sonnenscheibe wirklich verdeckt statt
-   * sie nur abzuschwaechen: Stratocumulus macht dicht, durch duenne Cirren
-   * sieht man eine Finsternis dagegen meist noch.
+   * minM/maxM sind die Hoehengrenzen des Stockwerks, heightM die
+   * repraesentative Mitte. opacity ist die Wahrscheinlichkeit, dass eine Wolke
+   * dieser Gattung die Sonnenscheibe wirklich verdeckt statt sie nur
+   * abzuschwaechen: Stratocumulus macht dicht, durch duenne Cirren sieht man
+   * eine Finsternis dagegen meist noch.
    */
   var CLOUD_LAYERS = [
-    { key: 'low', label: 'Tiefe Wolken', lowerLabel: 'tiefe Wolken', shortLabel: 'tief', heightM: 1500, opacity: 0.95, variable: 'cloud_cover_low' },
-    { key: 'mid', label: 'Mittelhohe Wolken', lowerLabel: 'mittelhohe Wolken', shortLabel: 'mittel', heightM: 5000, opacity: 0.85, variable: 'cloud_cover_mid' },
-    { key: 'high', label: 'Hohe Wolken (Cirren)', lowerLabel: 'hohe Wolken (Cirren)', shortLabel: 'hoch', heightM: 10000, opacity: 0.4, variable: 'cloud_cover_high' }
+    { key: 'low', label: 'Tiefe Wolken', lowerLabel: 'tiefe Wolken', shortLabel: 'tief', minM: 0, maxM: 3000, heightM: 1500, opacity: 0.95, variable: 'cloud_cover_low' },
+    { key: 'mid', label: 'Mittelhohe Wolken', lowerLabel: 'mittelhohe Wolken', shortLabel: 'mittel', minM: 3000, maxM: 8000, heightM: 5000, opacity: 0.85, variable: 'cloud_cover_mid' },
+    { key: 'high', label: 'Hohe Wolken (Cirren)', lowerLabel: 'hohe Wolken (Cirren)', shortLabel: 'hoch', minM: 8000, maxM: 16000, heightM: 10000, opacity: 0.4, variable: 'cloud_cover_high' }
   ];
+
+  /** Nur die Wolkenvariablen - die Strahlpunkte brauchen sonst nichts. */
+  var CLOUD_VARIABLES = CLOUD_LAYERS.map(function (l) { return l.variable; });
+
+  /*
+   * Abtastung der Sichtlinie: alle RAY_STEP_KM Kilometer ein Stuetzpunkt, vom
+   * Beobachter weg bis der Strahl ueber CLOUD_CEILING_M steigt oder die
+   * 300-km-Grenze reisst. 8 km liegt in der Groessenordnung der Modellgitter
+   * (2 km regional bis 11 km global) - feiner abzutasten liefert nur mehrfach
+   * dieselbe Gitterzelle.
+   */
+  var RAY_START_KM = 3;
+  var RAY_STEP_KM = 8;
+  var CLOUD_CEILING_M = 16000;
+
+  /*
+   * Wie die Bedeckung eines Schichtabschnitts zu einer Zahl wird.
+   *
+   * Physikalisch richtig waere das Maximum: eine dichte Wolke *irgendwo* auf
+   * dem Weg verdeckt die Sonne. Das Maximum haengt aber an einer einzigen
+   * Gitterzelle und damit am Rauschen des Modells. Das 85er-Perzentil nimmt
+   * praktisch die schlimmste Stelle, laesst einen einzelnen Ausreisser aber
+   * nicht die ganze Prognose kippen.
+   *
+   * Ausdruecklich *nicht* zulaessig waere, die Stuetzpunkte wie unabhaengige
+   * Wahrscheinlichkeiten zu multiplizieren: benachbarte Punkte sind dasselbe
+   * Wettersystem, kein neuer Wurf. 16 Punkte mit je 35 % Bedeckung ergaeben so
+   * 0,2 % statt 67 % freie Sicht.
+   */
+  var RAY_PERCENTILE = 0.85;
 
   function clamp(x, lo, hi) { return Math.min(hi, Math.max(lo, x)); }
 
@@ -109,6 +139,76 @@
   }
 
   /*
+   * Hoehe des Sehstrahls ueber Grund bei gegebener Bodendistanz - die
+   * Umkehrung von groundDistanceToAltitude, mit derselben sphaerischen
+   * Geometrie.
+   *
+   * Dreieck O-P-C: Winkel am Erdmittelpunkt ist die Bogenlaenge d/R, der
+   * Winkel bei C ergibt sich als 90 - Sonnenhoehe - d/R, und der Sinussatz
+   * liefert |OC| = R*cos(alpha)/sin(C). Die gesuchte Hoehe ist |OC| - R.
+   */
+  function rayHeightAt(elevationDeg, groundKm) {
+    var R = EARTH_RADIUS_KM;
+    var angleO = (groundKm / R) * RAD;
+    var angleC = 90 - elevationDeg - angleO;
+    if (angleC <= 0) return Infinity;
+    return (R * Math.cos(elevationDeg * DEG) / Math.sin(angleC * DEG) - R) * 1000;
+  }
+
+  /** In welchem Wolkenstockwerk liegt diese Hoehe? null oberhalb aller Schichten. */
+  function layerForHeight(heightM) {
+    for (var i = 0; i < CLOUD_LAYERS.length; i++) {
+      var l = CLOUD_LAYERS[i];
+      if (heightM >= l.minM && heightM < l.maxM) return l;
+    }
+    return null;
+  }
+
+  /*
+   * Die gesamte Sichtlinie als Folge von Stuetzpunkten.
+   *
+   * Jeder Punkt weiss, in welcher Hoehe der Strahl dort verlaeuft und welches
+   * Wolkenstockwerk das ist - abgefragt wird spaeter genau die Variable dieses
+   * Stockwerks. Damit sieht die Prognose auch eine Wolkenbank, die nicht
+   * zufaellig auf einem der drei Durchstosspunkte sitzt.
+   *
+   * capped meldet, dass der Strahl bei 300 km noch unterhalb der
+   * Wolkenobergrenze war - dann bleibt das oberste Stueck ungeprueft.
+   */
+  function sampleRay(place, sun, opts) {
+    opts = opts || {};
+    var stepKm = opts.stepKm || RAY_STEP_KM;
+    var maxKm = opts.maxDistanceKm || MAX_LINE_OF_SIGHT_KM;
+    var samples = [];
+    var capped = false;
+
+    for (var d = RAY_START_KM; d <= maxKm; d += stepKm) {
+      var h = rayHeightAt(sun.altitudeDeg, d);
+      if (!isFinite(h) || h >= CLOUD_CEILING_M) break;
+      var layer = layerForHeight(h);
+      if (!layer) continue;
+      samples.push({
+        distanceKm: d,
+        heightM: h,
+        layer: layer,
+        point: destinationPoint(place.lat, place.lon, sun.azimuthDeg, d)
+      });
+      if (d + stepKm > maxKm) {
+        capped = rayHeightAt(sun.altitudeDeg, maxKm) < CLOUD_CEILING_M;
+      }
+    }
+    samples.capped = capped;
+    return samples;
+  }
+
+  /** p-Perzentil einer Werteliste (0..1), null bei leerer Liste. */
+  function percentile(values, p) {
+    if (!values || values.length === 0) return null;
+    var s = values.slice().sort(function (a, b) { return a - b; });
+    return s[Math.min(s.length - 1, Math.floor(p * s.length))];
+  }
+
+  /*
    * Sichtchance aus den Wetterwerten entlang der Sichtlinie.
    *
    * Modell: Eine Wolkenschicht mit Bedeckungsgrad c verdeckt die Sonne mit der
@@ -151,14 +251,37 @@
       };
     }
 
+    /*
+     * clouds[key] ist entweder ein einzelner Bedeckungsgrad (Klimatologie,
+     * Altbestand) oder die Liste aller Stuetzpunkte, die in diesem Stockwerk
+     * liegen. Bei einer Liste entscheidet das Perzentil, nicht das Produkt -
+     * siehe RAY_PERCENTILE.
+     */
     var clear = 1;
     for (var i = 0; i < CLOUD_LAYERS.length; i++) {
       var layer = CLOUD_LAYERS[i];
       var raw = clouds[layer.key];
-      var cover = clamp((raw == null ? 0 : raw) / 100, 0, 1);
-      var blocked = cover * layer.opacity;
-      perLayer[layer.key] = { cover: cover, blocked: blocked };
-      clear *= 1 - blocked;
+      var cover, info;
+
+      if (Array.isArray(raw)) {
+        var vals = raw.filter(function (v) { return v !== null && isFinite(v); });
+        cover = vals.length ? clamp(percentile(vals, RAY_PERCENTILE) / 100, 0, 1) : 0;
+        info = {
+          cover: cover,
+          samples: vals.length,
+          maxCover: vals.length ? clamp(Math.max.apply(null, vals) / 100, 0, 1) : 0,
+          meanCover: vals.length
+            ? clamp(vals.reduce(function (a, b) { return a + b; }, 0) / vals.length / 100, 0, 1)
+            : 0
+        };
+      } else {
+        cover = clamp((raw == null ? 0 : raw) / 100, 0, 1);
+        info = { cover: cover, samples: 1, maxCover: cover, meanCover: cover };
+      }
+
+      info.blocked = cover * layer.opacity;
+      perLayer[layer.key] = info;
+      clear *= 1 - info.blocked;
     }
     factors.clouds = clear;
 
@@ -278,14 +401,27 @@
 
   function isoDate(d) { return d.toISOString().slice(0, 10); }
 
+  /** Open-Meteo erwartet start_hour/end_hour als YYYY-MM-DDTHH:MM. */
+  function isoHour(d) { return d.toISOString().slice(0, 13) + ':00'; }
+
   function fetchJson(url, opts) {
     opts = opts || {};
     var retries = opts.retries === undefined ? 1 : opts.retries;
     function attempt(n) {
       return fetch(url, { signal: opts.signal }).then(function (res) {
-        if (!res.ok) throw new Error('Wetterdienst antwortete mit HTTP ' + res.status);
+        if (!res.ok) {
+          var e = new Error('Wetterdienst antwortete mit HTTP ' + res.status);
+          e.status = res.status;
+          throw e;
+        }
         return res.json();
       }).catch(function (err) {
+        /*
+         * 4xx wiederholen bringt nichts: Ein erschoepftes Kontingent (429)
+         * oder eine fehlerhafte Anfrage wird beim zweiten Versuch nicht
+         * besser - im Fall von 429 macht die Wiederholung es sogar schlimmer.
+         */
+        if (err.status >= 400 && err.status < 500) throw err;
         if (err.name === 'AbortError' || n >= retries) throw err;
         return new Promise(function (r) { setTimeout(r, 800); }).then(function () {
           return attempt(n + 1);
@@ -300,12 +436,12 @@
    * (cloud_cover_low_icon_seamless). Das normalisieren wir wieder auf
    * { modelId: { time, cloud_cover_low, ... } }.
    */
-  function parseSeries(hourly, modelIds) {
+  function parseSeries(hourly, modelIds, variables) {
     var time = ((hourly && hourly.time) || []).map(function (t) { return new Date(t + 'Z'); });
     var out = {};
     modelIds.forEach(function (model) {
       var series = { time: time };
-      HOURLY_VARIABLES.forEach(function (v) {
+      (variables || HOURLY_VARIABLES).forEach(function (v) {
         var withModel = hourly && hourly[v + '_' + model];
         series[v] = withModel !== undefined && withModel !== null
           ? withModel
@@ -316,20 +452,33 @@
     return out;
   }
 
-  /** Vorhersage fuer viele Punkte und Modelle in einem einzigen Aufruf. */
+  /*
+   * Vorhersage fuer viele Punkte und Modelle in einem einzigen Aufruf.
+   *
+   * Open-Meteo rechnet das Kontingent als Orte x (Tage/14) x (Variablen/10).
+   * Weil die Strahlpunkte auf 200+ anwachsen, zaehlen hier beide Sparhebel:
+   * opts.variables schneidet die Variablenliste auf das, was der Aufrufer
+   * wirklich braucht, und opts.fromDate/toDate samt Stundenfenster begrenzen
+   * den Zeitraum auf die Finsternis statt auf drei volle Tage.
+   */
   function fetchForecast(points, date, opts) {
     opts = opts || {};
     var models = opts.models || MODELS.map(function (m) { return m.id; });
-    // Ein Tag Puffer nach beiden Seiten, damit die Interpolation an den Raendern klappt.
-    var from = isoDate(new Date(date.getTime() - 86400000));
-    var to = isoDate(new Date(date.getTime() + 86400000));
+    var variables = opts.variables || HOURLY_VARIABLES;
+    var from = isoDate(opts.fromDate || new Date(date.getTime() - 86400000));
+    var to = isoDate(opts.toDate || new Date(date.getTime() + 86400000));
 
     var url = FORECAST_URL +
       '?latitude=' + points.map(function (p) { return p.lat.toFixed(4); }).join(',') +
       '&longitude=' + points.map(function (p) { return p.lon.toFixed(4); }).join(',') +
-      '&hourly=' + HOURLY_VARIABLES.join(',') +
+      '&hourly=' + variables.join(',') +
       '&models=' + models.join(',') +
       '&timezone=UTC&start_date=' + from + '&end_date=' + to;
+
+    // Stundenfenster: schneidet Datenmenge und Kontingent noch einmal deutlich.
+    if (opts.startHour && opts.endHour) {
+      url += '&start_hour=' + isoHour(opts.startHour) + '&end_hour=' + isoHour(opts.endHour);
+    }
 
     return fetchJson(url, opts).then(function (data) {
       var list = Array.isArray(data) ? data : [data];
@@ -338,7 +487,7 @@
           latitude: entry.latitude === undefined ? points[i].lat : entry.latitude,
           longitude: entry.longitude === undefined ? points[i].lon : entry.longitude,
           elevation: entry.elevation === undefined ? null : entry.elevation,
-          series: parseSeries(entry.hourly, models)
+          series: parseSeries(entry.hourly, models, variables)
         };
       });
     });
@@ -402,31 +551,71 @@
    * die drei Durchstosspunkte. Steht die Sonne unter dem Horizont, entfaellt
    * die Sichtlinie - dann ist ohnehin nichts zu sehen.
    */
-  function buildSamplePoints(place, steps) {
-    var points = [{ lat: place.lat, lon: place.lon }];
+  function buildSamplePoints(place, steps, opts) {
+    var points = [];
     var built = steps.map(function (st) {
-      if (st.altitudeDeg <= 0) return { step: st, los: null, indices: null };
-      var los = lineOfSight(place, { altitudeDeg: Math.max(st.altitudeDeg, 0), azimuthDeg: st.azimuthDeg });
+      if (st.altitudeDeg <= 0) return { step: st, ray: null, indices: null };
+      var ray = sampleRay(place, {
+        altitudeDeg: Math.max(st.altitudeDeg, 0), azimuthDeg: st.azimuthDeg
+      }, opts);
       var indices = {};
-      los.forEach(function (entry) {
-        indices[entry.layer.key] = points.length;
-        points.push(entry.point);
+      CLOUD_LAYERS.forEach(function (l) { indices[l.key] = []; });
+      ray.forEach(function (s) {
+        s.pointIndex = points.length;
+        indices[s.layer.key].push(points.length);
+        points.push(s.point);
       });
-      return { step: st, los: los, indices: indices };
+      return { step: st, ray: ray, indices: indices, capped: !!ray.capped };
     });
     return { points: points, built: built };
   }
 
+  /*
+   * Bedeckung je Stockwerk fuer einen Zeitschritt: pro Schicht die Liste aller
+   * Stuetzpunkte, die in dieser Schicht liegen. visibilityChance() macht daraus
+   * ueber das Perzentil eine Zahl.
+   */
   function cloudsFor(entry, results, model) {
     var clouds = {};
     CLOUD_LAYERS.forEach(function (layer) {
-      var idx = entry.indices ? entry.indices[layer.key] : undefined;
-      var series = idx === undefined ? null : (results[idx] && results[idx].series[model]);
-      var value = series ? sampleAt(series, layer.variable, entry.step.date) : null;
-      clouds[layer.key] = value === null ? 0 : value;
-      clouds[layer.key + '_missing'] = value === null;
+      var idxs = entry.indices ? entry.indices[layer.key] : null;
+      if (!idxs || idxs.length === 0) {
+        clouds[layer.key] = [];
+        clouds[layer.key + '_missing'] = true;
+        return;
+      }
+      var values = [];
+      idxs.forEach(function (i) {
+        var series = results[i] && results[i].series[model];
+        var v = series ? sampleAt(series, layer.variable, entry.step.date) : null;
+        if (v !== null) values.push(v);
+      });
+      clouds[layer.key] = values;
+      clouds[layer.key + '_missing'] = values.length === 0;
     });
     return clouds;
+  }
+
+  /*
+   * Fasst die Stuetzpunkte eines Zeitschritts je Schicht zusammen - das ist,
+   * was die Tabelle "Sichtlinie zur Sonne" zeigt.
+   */
+  function summariseRay(entry, perLayer) {
+    if (!entry.ray) return [];
+    return CLOUD_LAYERS.map(function (layer) {
+      var seg = entry.ray.filter(function (s) { return s.layer.key === layer.key; });
+      var info = perLayer && perLayer[layer.key];
+      return {
+        layer: layer,
+        samples: seg.length,
+        fromKm: seg.length ? seg[0].distanceKm : null,
+        toKm: seg.length ? seg[seg.length - 1].distanceKm : null,
+        cover: info ? info.cover * 100 : null,
+        maxCover: info ? info.maxCover * 100 : null,
+        meanCover: info ? info.meanCover * 100 : null,
+        capped: !!entry.capped && layer.key === 'high'
+      };
+    });
   }
 
   /*
@@ -438,17 +627,49 @@
    */
   function analyse(place, steps, opts) {
     opts = opts || {};
-    var prep = buildSamplePoints(place, steps);
+    var prep = buildSamplePoints(place, steps, opts);
 
     var peakStep = null;
     for (var k = 0; k < steps.length; k++) if (steps[k].isPeak) peakStep = steps[k];
     var peakDate = (peakStep || steps[0]).date;
 
-    return fetchForecast(prep.points, peakDate, opts).then(function (results) {
-      var observer = results[0] && results[0].series[PRIMARY_MODEL];
+    /*
+     * Zeitfenster statt drei voller Tage: zwei Stunden Puffer um die
+     * Finsternis reichen fuer die stuendliche Interpolation und sparen den
+     * Grossteil von Datenmenge und API-Kontingent.
+     */
+    var dates = steps.map(function (s) { return s.date.getTime(); });
+    var startHour = new Date(Math.min.apply(null, dates) - 2 * 3600000);
+    var endHour = new Date(Math.max.apply(null, dates) + 2 * 3600000);
+    var window = {
+      fromDate: startHour, toDate: endHour,
+      startHour: startHour, endHour: endHour
+    };
+    function withWindow(extra) {
+      var o = { signal: opts.signal, retries: opts.retries, models: opts.models };
+      for (var k2 in window) o[k2] = window[k2];
+      for (var k3 in extra) o[k3] = extra[k3];
+      return o;
+    }
+
+    /*
+     * Zwei Abfragen statt einer: die Strahlpunkte brauchen nur die drei
+     * Wolkenvariablen, die vollen acht Variablen nur der Standort selbst.
+     * Bei 200+ Strahlpunkten ist das der groesste Sparhebel ueberhaupt.
+     */
+    return Promise.all([
+      prep.points.length
+        ? fetchForecast(prep.points, peakDate, withWindow({ variables: CLOUD_VARIABLES }))
+        : Promise.resolve([]),
+      fetchForecast([{ lat: place.lat, lon: place.lon }], peakDate,
+        withWindow({ variables: HOURLY_VARIABLES }))
+    ]).then(function (both) {
+      var results = both[0];
+      var obsResults = both[1];
+      var observer = obsResults[0] && obsResults[0].series[PRIMARY_MODEL];
 
       function chanceFor(entry, model) {
-        var obs = results[0] && results[0].series[model];
+        var obs = obsResults[0] && obsResults[0].series[model];
         var clouds = cloudsFor(entry, results, model);
         var prec = obs ? sampleAt(obs, 'precipitation', entry.step.date) : null;
         var r = visibilityChance(clouds, {
@@ -463,17 +684,13 @@
       // Verlauf nach dem Hauptmodell
       var timeline = prep.built.map(function (entry) {
         var r = chanceFor(entry, PRIMARY_MODEL);
-        // Bedeckung an den Punkt haengen, damit die Tabelle sie zeigen kann
-        if (entry.los) {
-          entry.los.forEach(function (l) { l.cover = r.clouds[l.layer.key]; });
-        }
         return {
           date: entry.step.date,
           label: entry.step.label,
           altitudeDeg: entry.step.altitudeDeg,
           azimuthDeg: entry.step.azimuthDeg,
           isPeak: !!entry.step.isPeak,
-          los: entry.los,
+          los: summariseRay(entry, r.perLayer),
           chance: r.chance,
           factors: r.factors,
           perLayer: r.perLayer,
@@ -510,10 +727,28 @@
         totalCloudCover: sampleAt(observer, 'cloud_cover', peakDate)
       } : null;
 
+      /*
+       * Das volle Wolkenprofil entlang des Strahls zum Maximum - Grundlage
+       * fuer die Seitenansicht, die damit die echte Bewoelkung zeigt statt
+       * drei Punkten.
+       */
+      var rayProfile = (peakBuilt.ray || []).map(function (s) {
+        var series = results[s.pointIndex] && results[s.pointIndex].series[PRIMARY_MODEL];
+        return {
+          distanceKm: s.distanceKm,
+          heightM: s.heightM,
+          layer: s.layer,
+          cover: series ? sampleAt(series, s.layer.variable, peakDate) : null
+        };
+      });
+
       return {
         timeline: timeline,
         peak: peakEntry,
-        lineOfSight: peakBuilt.los,
+        lineOfSight: peakEntry.los,
+        rayProfile: rayProfile,
+        rayCapped: !!peakBuilt.capped,
+        samplePoints: prep.points.length,
         rating: rating(peakEntry.chance),
         explanation: explain(
           { belowHorizon: peakEntry.belowHorizon, perLayer: peakEntry.perLayer, factors: peakEntry.factors },
@@ -657,7 +892,14 @@
     MAX_FORECAST_DAYS: MAX_FORECAST_DAYS,
     MAX_LINE_OF_SIGHT_KM: MAX_LINE_OF_SIGHT_KM,
     EARTH_RADIUS_KM: EARTH_RADIUS_KM,
+    CLOUD_VARIABLES: CLOUD_VARIABLES,
+    RAY_STEP_KM: RAY_STEP_KM,
+    RAY_PERCENTILE: RAY_PERCENTILE,
     groundDistanceToAltitude: groundDistanceToAltitude,
+    rayHeightAt: rayHeightAt,
+    layerForHeight: layerForHeight,
+    sampleRay: sampleRay,
+    percentile: percentile,
     destinationPoint: destinationPoint,
     lineOfSight: lineOfSight,
     visibilityChance: visibilityChance,

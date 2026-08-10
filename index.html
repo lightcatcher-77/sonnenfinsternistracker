@@ -284,14 +284,21 @@
   <details class="card">
     <summary>Methodik und Grenzen der Sichtprognose</summary>
     <ul class="tips">
-      <li><strong>Was gerechnet wird:</strong> Für jede der drei Wolkenschichten wird der
-          Punkt bestimmt, an dem die Sichtlinie zur Sonne sie durchstößt – sphärisch, also
-          mit der Erdkrümmung. Bei 1° Sonnenhöhe liegt der Durchstoßpunkt einer 10-km-Wolke
-          262&nbsp;km entfernt statt 573&nbsp;km, wie es die ebene Rechnung ergäbe.</li>
+      <li><strong>Was gerechnet wird:</strong> Die Sichtlinie zur Sonne wird alle 8&nbsp;km
+          abgetastet – sphärisch, also mit der Erdkrümmung. Jeder Stützpunkt wird dem
+          Wolkenstockwerk zugeordnet, in dem der Strahl dort verläuft, und genau dessen
+          Bewölkung wird abgefragt. Bei 1,8° Sonnenhöhe sind das rund 37 Punkte bis in
+          290&nbsp;km Entfernung. Die Krümmung ist dabei erheblich: Eine 10-km-Wolke steht
+          bei 1° Sonnenhöhe 262&nbsp;km entfernt statt 573&nbsp;km, wie es die ebene
+          Rechnung ergäbe.</li>
       <li><strong>Das Modell:</strong> Eine Schicht mit Bedeckungsgrad c verdeckt die Sonne
           mit der Wahrscheinlichkeit c&nbsp;·&nbsp;Undurchlässigkeit (tief 0,95, mittel 0,85,
-          Cirren 0,4). Die Schichten gelten als unabhängig. Darauf kommen Abschläge für
-          Horizontnähe, Dunst und Niederschlag.</li>
+          Cirren 0,4). Je Stockwerk zählt die schlechteste Stelle entlang des Strahls
+          (85er-Perzentil), nicht der Durchschnitt – eine Wolkenbank verdeckt die Sonne
+          auch dann, wenn der Rest des Wegs frei ist. Die drei Stockwerke gelten als
+          unabhängig und werden multipliziert, die Stützpunkte innerhalb eines Stockwerks
+          ausdrücklich nicht: benachbarte Punkte sind dasselbe Wettersystem. Darauf kommen
+          Abschläge für Dunst und Niederschlag.</li>
       <li><strong>Das ist eine Heuristik</strong>, keine Strahlungsrechnung. „80 %" heißt:
           In vier von fünf vergleichbaren Lagen sieht man die Sonne.</li>
       <li><strong>Nicht modelliert:</strong> die Refraktion krümmt den Sehstrahl leicht nach
@@ -303,8 +310,8 @@
       <li><strong>Reichweite:</strong> Wettermodelle reichen 16 Tage. Darüber hinaus hilft
           nur die Klimatologie – die sagt nicht, wie es wird, sondern wie es meistens war.</li>
       <li><strong>Datenquelle:</strong> Open-Meteo (Vorhersage) und ERA5 (Archiv), beides
-          ohne API-Schlüssel. Der Abruf startet nur auf Knopfdruck, damit die App auch
-          ohne Netz vollständig nutzbar bleibt.</li>
+          ohne API-Schlüssel. Der Abruf startet nur auf Knopfdruck und braucht Internet –
+          alles andere auf dieser Seite funktioniert auch offline.</li>
     </ul>
   </details>
 

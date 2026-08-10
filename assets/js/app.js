@@ -379,6 +379,7 @@
     renderStats();
     renderNotices();
     renderSliderMarks();
+    renderVisibility();
     renderDynamic();
     updateModeButtons();
     $('resultArea').classList.remove('hidden');
@@ -673,6 +674,89 @@
     });
     els.forEach(function (el) { el.classList.remove('is-now'); });
     if (bestEl && bestD < 4 / 60) bestEl.classList.add('is-now');
+  }
+
+  /* ==================================================================
+   * Sichtprognose (braucht Netz)
+   * ================================================================== */
+
+  // Beim Ortswechsel gilt ein alter Abruf nicht mehr.
+  function renderVisibility() {
+    var box = $('visResult');
+    box.innerHTML = '';
+    var btn = $('btnVis');
+    btn.disabled = false;
+    btn.textContent = '☁ Sichtchance abrufen';
+  }
+
+  function loadVisibility() {
+    var c = state.circ;
+    var box = $('visResult');
+    var btn = $('btnVis');
+
+    if (!c || !c.hasEclipse) {
+      box.innerHTML = '<div class="notice notice-info">An diesem Ort ist die Finsternis ' +
+        'nicht zu sehen – es gibt nichts zu prognostizieren.</div>';
+      return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = '… wird abgerufen';
+    box.innerHTML = '';
+
+    var sun = { altitudeDeg: c.maxAltitude, azimuthDeg: c.maxAzimuth };
+
+    window.Visibility.fetchAlongLineOfSight(state.place, sun, c.maxDate)
+      .then(function (r) {
+        btn.disabled = false;
+        btn.textContent = '↻ Neu abrufen';
+        box.innerHTML = visibilityHTML(r);
+      })
+      .catch(function (err) {
+        btn.disabled = false;
+        btn.textContent = '↻ Erneut versuchen';
+        // Offline ist der Normalfall am Finsternistag auf dem Feld, kein Drama.
+        box.innerHTML = '<div class="notice notice-warn"><span class="notice-icon">📡</span>' +
+          '<div>Die Wolkendaten konnten nicht geladen werden – dafür braucht es ' +
+          'Internet. Alles andere auf dieser Seite funktioniert auch ohne.' +
+          '<br><span class="vis-err">' + escapeHTML(String(err.message || err)) + '</span></div></div>';
+      });
+  }
+
+  function escapeHTML(s) {
+    return s.replace(/[&<>"]/g, function (ch) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch];
+    });
+  }
+
+  function visibilityHTML(r) {
+    var pct = Math.round(r.result.chance * 100);
+    var h = '<div class="vis-head vis-' + r.rating.key + '">' +
+      '<div class="vis-pct">' + pct + ' %</div>' +
+      '<div class="vis-rate">' + r.rating.label + '</div></div>';
+
+    h += '<p class="vis-why">' + escapeHTML(r.explanation) + '</p>';
+
+    h += '<div class="vis-rows">';
+    for (var i = 0; i < r.lineOfSight.length; i++) {
+      var p = r.lineOfSight[i];
+      var cover = p.cover == null ? '–' : Math.round(p.cover) + ' %';
+      var dist = isFinite(p.rawDistanceKm)
+        ? Math.round(p.distanceKm) + ' km' + (p.capped ? '+' : '')
+        : '–';
+      h += '<div class="vis-row">' +
+        '<span class="vis-layer">' + p.layer.label + '</span>' +
+        '<span class="vis-dist">' + dist + '</span>' +
+        '<span class="vis-cover">' + cover + '</span></div>';
+    }
+    h += '</div>';
+
+    var t = r.validAt.toLocaleTimeString('de-DE', {
+      hour: '2-digit', minute: '2-digit', timeZone: state.place.tz
+    });
+    h += '<p class="vis-foot">Bewölkung am Durchstoßpunkt jeder Schicht, ' +
+      'Modellstunde ' + t + '. Quelle: Open-Meteo.</p>';
+    return h;
   }
 
   /* ==================================================================
@@ -1123,6 +1207,7 @@
     $('btnGeo').addEventListener('click', useGeolocation);
     $('btnIcs').addEventListener('click', downloadICS);
     $('btnShare').addEventListener('click', shareResult);
+    $('btnVis').addEventListener('click', loadVisibility);
 
     drawStarfield();
 

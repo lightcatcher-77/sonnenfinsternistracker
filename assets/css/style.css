@@ -853,3 +853,90 @@ footer a { color: var(--text-dim); }
 
   footer { padding: 18px 16px 6px; }
 }
+
+/* --- Sichtprognose --------------------------------------------------- */
+.vis-intro {
+  margin: 0 0 14px;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-dim);
+}
+
+#visResult:empty { display: none; }
+#visResult { margin-top: 14px; }
+
+.vis-head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 14px 16px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-bright);
+  background: rgba(6, 12, 26, 0.55);
+}
+
+.vis-pct {
+  font-family: var(--mono);
+  font-size: 34px;
+  font-weight: 800;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  color: var(--cyan);
+}
+
+.vis-rate {
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+/* Farbe nach Bewertung - dieselbe Sprache wie der Rest der App */
+.vis-sehr-gut { border-color: rgba(67, 232, 160, 0.5); }
+.vis-sehr-gut .vis-pct { color: var(--ok); }
+.vis-gut .vis-pct { color: var(--ok); }
+.vis-mittel { border-color: rgba(255, 179, 71, 0.5); }
+.vis-mittel .vis-pct { color: var(--corona-hot); }
+.vis-schlecht .vis-pct,
+.vis-sehr-schlecht .vis-pct { color: var(--danger); }
+.vis-schlecht, .vis-sehr-schlecht { border-color: rgba(255, 92, 122, 0.45); }
+
+.vis-why {
+  margin: 12px 0 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-dim);
+}
+
+.vis-rows { display: grid; gap: 6px; margin-top: 12px; }
+
+.vis-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: baseline;
+  gap: 10px;
+  padding: 9px 11px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: rgba(6, 12, 26, 0.45);
+  font-size: 12.5px;
+}
+
+.vis-layer { color: var(--text); overflow-wrap: break-word; }
+.vis-dist, .vis-cover {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.vis-dist { color: var(--text-faint); font-size: 11.5px; }
+.vis-cover { color: var(--cyan); font-weight: 700; }
+
+.vis-foot {
+  margin: 12px 0 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-faint);
+}
+
+.vis-err { font-family: var(--mono); font-size: 11px; opacity: 0.8; }

@@ -798,7 +798,6 @@
     var f = r.peak.factors;
     var facs = [
       ['Freie Sicht durch die Wolken', f.clouds],
-      ['Horizontnähe', f.horizon],
       ['Dunst', f.haze],
       ['Niederschlag', f.precipitation]
     ];
@@ -808,7 +807,7 @@
         '<span class="fac-bar"><i style="width:' + (v * 100).toFixed(1) + '%"></i></span>' +
         '<span class="fac-val">×' + v.toFixed(2).replace('.', ',') + '</span></div>';
     });
-    h += '</div><p class="vis-foot">Die vier Faktoren werden multipliziert: ' +
+    h += '</div><p class="vis-foot">Die drei Faktoren werden multipliziert: ' +
       facs.map(function (x) { return Math.max(0, Math.min(1, x[1])).toFixed(2).replace('.', ','); }).join(' × ') +
       ' = ' + r.peak.chance.toFixed(2).replace('.', ',') + '</p>';
 

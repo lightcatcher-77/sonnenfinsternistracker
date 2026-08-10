@@ -114,13 +114,20 @@
    * Modell: Eine Wolkenschicht mit Bedeckungsgrad c verdeckt die Sonne mit der
    * Wahrscheinlichkeit c*opacity. Die Schichten gelten als unabhaengig, also
    * ist die Chance auf freie Sicht das Produkt der Gegenwahrscheinlichkeiten.
-   * Darauf kommen drei Daempfungsfaktoren:
+   * Darauf kommen zwei Daempfungsfaktoren:
    *
-   *  - horizon: Bei tief stehender Sonne geht der Blick durch viel Grenz-
-   *    schicht, ausserdem verdecken Huegel, Baeume und Haeuser den Horizont.
-   *    Modelle sehen das nicht.
    *  - haze: Bodennahe Sichtweite, nur bei tiefer Sonne relevant.
    *  - precipitation: Niederschlag bedeutet in der Praxis dichte Bewoelkung.
+   *
+   * Bewusst *kein* eigener Abschlag fuer die Hoehe der Sonne. Eine tief
+   * stehende Sonne ist bei klarer Luft schlicht sichtbar - nichts anderes ist
+   * ein Sonnenuntergang. Was sie tatsaechlich verschwinden laesst, ist Dunst,
+   * und der steckt bereits im haze-Faktor. Ein zusaetzlicher Hoehenabschlag
+   * waere Doppelzaehlung und obendrein wirkungslos fuer den Ortsvergleich:
+   * alle Orte einer Region haben dieselbe Sonnenhoehe, ein solcher Faktor
+   * druecke also nur alle Zahlen gleichmaessig nach unten. Verdeckung durch
+   * Gelaende, Baeume und Haeuser bleibt ebenfalls draussen - die haengt am
+   * konkreten Standort, nicht am Wetter, und wird als Hinweis ausgegeben.
    *
    * Das Ergebnis ist eine Heuristik, keine Strahlungsrechnung - bewusst so
    * kalibriert, dass "80 %" heisst: In vier von fuenf vergleichbaren Lagen
@@ -138,7 +145,7 @@
     if (sunAltitude <= 0) {
       return {
         chance: 0,
-        factors: { clouds: 0, horizon: 0, haze: 1, precipitation: 1 },
+        factors: { clouds: 0, haze: 1, precipitation: 1 },
         perLayer: perLayer,
         belowHorizon: true
       };
@@ -155,9 +162,6 @@
     }
     factors.clouds = clear;
 
-    // Tiefe Sonne: Dunst und Gelaendehorizont. Ab 10 Grad kein Abschlag mehr.
-    factors.horizon = sunAltitude >= 10 ? 1 : clamp(0.55 + 0.045 * sunAltitude, 0.55, 1);
-
     // Sichtweite zaehlt nur, solange die Sonne tief steht (langer Weg durch Dunst).
     if (visibility === null || isNaN(visibility)) {
       factors.haze = 1;
@@ -170,7 +174,7 @@
     factors.precipitation = precipitation > 0.2 ? 0.25 : precipitation > 0.05 ? 0.7 : 1;
 
     var chance = clamp(
-      factors.clouds * factors.horizon * factors.haze * factors.precipitation, 0, 1
+      factors.clouds * factors.haze * factors.precipitation, 0, 1
     );
     return { chance: chance, factors: factors, perLayer: perLayer, belowHorizon: false };
   }
@@ -217,14 +221,25 @@
     } else {
       parts.push('kaum Bewölkung in Blickrichtung');
     }
-    if (result.factors.horizon < 1) {
-      parts.push('Sonne nur ' + sunAltitude.toLocaleString('de-DE', { maximumFractionDigits: 1 }) +
-        '° über dem Horizont');
-    }
     if (result.factors.haze < 0.85) parts.push('Dunst in Horizontnähe');
     if (result.factors.precipitation < 1) parts.push('Niederschlag');
 
-    return 'Ausschlaggebend: ' + parts.join(', ') + '.';
+    var text = 'Ausschlaggebend: ' + parts.join(', ') + '.';
+
+    /*
+     * Die Sonnenhoehe geht nicht in die Zahl ein (siehe visibilityChance),
+     * ist unter ein paar Grad aber die praktisch wichtigste Information:
+     * Dann entscheidet die freie Sicht nach Westen, und die sieht kein
+     * Wettermodell.
+     */
+    if (sunAltitude > 0 && sunAltitude < 5) {
+      text += ' Die Sonne steht dabei nur ' +
+        sunAltitude.toLocaleString('de-DE', { maximumFractionDigits: 1 }) +
+        '° über dem Horizont – du brauchst freie Sicht in Blickrichtung. ' +
+        'Verdeckung durch Berge, Bäume oder Häuser steckt nicht in dieser Zahl.';
+    }
+
+    return text;
   }
 
   /* ==================================================================

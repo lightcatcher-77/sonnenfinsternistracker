@@ -123,6 +123,12 @@
       </div>
     </section>
 
+    <!-- ============ Live-Ansicht ============ -->
+    <section class="card" id="liveCard">
+      <h2>Live-Ansicht</h2>
+      <div id="liveBody"></div>
+    </section>
+
     </div><!-- /.dash-main -->
     <div class="dash-side">
 
@@ -155,10 +161,41 @@
         Entscheidend ist nicht die Bewölkung <em>über</em> dir, sondern die entlang der
         Sichtlinie zur Sonne. Weil die Sonne so tief steht, hängt die Wolke, die sie
         verdeckt, zig bis hunderte Kilometer entfernt – oft bei ganz anderem Wetter.
-        Der Abruf holt die Bewölkung genau dort.
       </p>
       <button class="btn" id="btnVis" type="button">☁ Sichtchance abrufen</button>
       <div id="visResult"></div>
+    </section>
+
+    <!-- ============ Klimatologie ============ -->
+    <section class="card">
+      <h2>Klimatologie statt Vorhersage</h2>
+      <p class="vis-intro">
+        Wie oft wäre die Sonne an diesem Ort, an diesem Kalendertag, zu dieser Tageszeit
+        in den vergangenen 20 Jahren zu sehen gewesen? Keine Vorhersage – die
+        Häufigkeitsverteilung der Vergangenheit.
+      </p>
+      <button class="btn btn-ghost" id="btnClima" type="button">📊 20 Jahre auswerten</button>
+      <div id="climaResult"></div>
+    </section>
+
+    <!-- ============ Orte vergleichen ============ -->
+    <section class="card">
+      <h2>Orte vergleichen</h2>
+      <p class="vis-intro">
+        Ein Loch in der Wolkendecke ist mehr wert als der perfekte Beobachtungsplatz.
+        Hier siehst du, ob sich die Fahrt lohnt.
+      </p>
+      <div class="loc-row">
+        <div class="search-wrap">
+          <input type="text" id="cmpSearch" placeholder="Ort hinzufügen…"
+                 autocomplete="off" autocorrect="off" spellcheck="false"
+                 aria-label="Ort für den Vergleich suchen">
+          <div class="suggestions" id="cmpSuggestions" role="listbox"></div>
+        </div>
+        <button class="btn" id="btnCmp" type="button">Vergleichen</button>
+      </div>
+      <div id="cmpChips" class="cmp-chips"></div>
+      <div id="cmpResult"></div>
     </section>
 
     <!-- ============ Kennzahlen ============ -->
@@ -241,6 +278,33 @@
           Spezialkarte mit Randprofil ansehen.</li>
       <li>Verwendet wird ΔT&nbsp;=&nbsp;75,4&nbsp;s. Die Höhe über dem Meer geht in die
           Rechnung ein – bei Bergstationen lohnt es sich, sie einzutragen.</li>
+    </ul>
+  </details>
+
+  <details class="card">
+    <summary>Methodik und Grenzen der Sichtprognose</summary>
+    <ul class="tips">
+      <li><strong>Was gerechnet wird:</strong> Für jede der drei Wolkenschichten wird der
+          Punkt bestimmt, an dem die Sichtlinie zur Sonne sie durchstößt – sphärisch, also
+          mit der Erdkrümmung. Bei 1° Sonnenhöhe liegt der Durchstoßpunkt einer 10-km-Wolke
+          262&nbsp;km entfernt statt 573&nbsp;km, wie es die ebene Rechnung ergäbe.</li>
+      <li><strong>Das Modell:</strong> Eine Schicht mit Bedeckungsgrad c verdeckt die Sonne
+          mit der Wahrscheinlichkeit c&nbsp;·&nbsp;Undurchlässigkeit (tief 0,95, mittel 0,85,
+          Cirren 0,4). Die Schichten gelten als unabhängig. Darauf kommen Abschläge für
+          Horizontnähe, Dunst und Niederschlag.</li>
+      <li><strong>Das ist eine Heuristik</strong>, keine Strahlungsrechnung. „80 %" heißt:
+          In vier von fünf vergleichbaren Lagen sieht man die Sonne.</li>
+      <li><strong>Nicht modelliert:</strong> die Refraktion krümmt den Sehstrahl leicht nach
+          unten; das echte Geländeprofil (Berge, Häuser) kennt die App nicht; Wolkenlücken
+          unterhalb der Modellauflösung von einigen Kilometern ebenso wenig.</li>
+      <li><strong>Streuung schlägt Einzelwert.</strong> Wenn sich ECMWF, ICON, GFS und
+          Météo-France einig sind, ist die Zahl belastbar. Gehen sie auseinander, ist die
+          Spanne die ehrlichere Aussage als jede Einzelvorhersage.</li>
+      <li><strong>Reichweite:</strong> Wettermodelle reichen 16 Tage. Darüber hinaus hilft
+          nur die Klimatologie – die sagt nicht, wie es wird, sondern wie es meistens war.</li>
+      <li><strong>Datenquelle:</strong> Open-Meteo (Vorhersage) und ERA5 (Archiv), beides
+          ohne API-Schlüssel. Der Abruf startet nur auf Knopfdruck, damit die App auch
+          ohne Netz vollständig nutzbar bleibt.</li>
     </ul>
   </details>
 

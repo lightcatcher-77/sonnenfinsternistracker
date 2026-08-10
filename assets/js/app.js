@@ -380,6 +380,7 @@
     renderNotices();
     renderSliderMarks();
     renderVisibility();
+    renderLive();
     renderDynamic();
     updateModeButtons();
     $('resultArea').classList.remove('hidden');
@@ -677,86 +678,632 @@
   }
 
   /* ==================================================================
-   * Sichtprognose (braucht Netz)
+   * Sichtprognose (der einzige Teil, der Netz braucht)
    * ================================================================== */
 
-  // Beim Ortswechsel gilt ein alter Abruf nicht mehr.
+  var VIS = window.Visibility;
+  var visState = { data: null, clima: null, compare: [] };
+
+  function escapeHTML(s) {
+    return String(s).replace(/[&<>"]/g, function (ch) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch];
+    });
+  }
+
+  function pctText(x) { return Math.round(x * 100) + ' %'; }
+
+  /*
+   * Stuetzstellen ueber den Finsternisverlauf: gleichmaessig zwischen erstem
+   * und letztem Kontakt, dazu das Maximum und - falls er dazwischen liegt -
+   * der Sonnenuntergang. Der ist ein harter Knick: davor ist etwas zu sehen,
+   * danach nichts mehr. Ohne eigene Stuetzstelle fiele die Kurve verspaetet.
+   */
+  function buildSteps(steps) {
+    var c = state.circ;
+    if (!c || !c.hasEclipse) return [];
+    var t0 = c.c1T !== null ? c.c1T : c.maxT;
+    var t1 = c.c4T !== null ? c.c4T : c.maxT;
+    var n = steps || 8;
+    var ts = [];
+    for (var i = 0; i <= n; i++) ts.push(t0 + (t1 - t0) * i / n);
+    ts.push(c.maxT);
+    if (c.sunsetDuring) {
+      var st = EC.dateToT(EL, c.sunsetDuring);
+      if (st > t0 && st < t1) ts.push(st);
+    }
+    ts.sort(function (x, y) { return x - y; });
+
+    var out = [];
+    for (var k = 0; k < ts.length; k++) {
+      if (k > 0 && Math.abs(ts[k] - ts[k - 1]) < 1e-6) continue;
+      var st2 = EC.stateAt(EL, state.obs, ts[k]);
+      out.push({
+        t: ts[k],
+        date: EC.tToDate(EL, ts[k]),
+        altitudeDeg: st2.altitudeDeg,
+        azimuthDeg: st2.azimuthDeg,
+        obscuration: st2.obscuration,
+        isPeak: Math.abs(ts[k] - c.maxT) < 1e-9
+      });
+    }
+    return out;
+  }
+
   function renderVisibility() {
-    var box = $('visResult');
-    box.innerHTML = '';
-    var btn = $('btnVis');
-    btn.disabled = false;
-    btn.textContent = '☁ Sichtchance abrufen';
+    visState.data = null;
+    visState.clima = null;
+    $('visResult').innerHTML = '';
+    $('climaResult').innerHTML = '';
+    $('cmpResult').innerHTML = '';
+    resetBtn('btnVis', '☁ Sichtchance abrufen');
+    resetBtn('btnClima', '📊 20 Jahre auswerten');
+  }
+
+  function resetBtn(id, label) {
+    var b = $(id);
+    if (!b) return;
+    b.disabled = false;
+    b.textContent = label;
+  }
+
+  function netError(box, err, btnId, label) {
+    resetBtn(btnId, label);
+    box.innerHTML = '<div class="notice notice-warn"><span class="notice-icon">📡</span>' +
+      '<div>Die Wetterdaten konnten nicht geladen werden – dafür braucht es Internet. ' +
+      'Alles andere auf dieser Seite funktioniert auch ohne.' +
+      '<br><span class="vis-err">' + escapeHTML(err && err.message ? err.message : err) +
+      '</span></div></div>';
   }
 
   function loadVisibility() {
     var c = state.circ;
     var box = $('visResult');
-    var btn = $('btnVis');
-
     if (!c || !c.hasEclipse) {
       box.innerHTML = '<div class="notice notice-info">An diesem Ort ist die Finsternis ' +
         'nicht zu sehen – es gibt nichts zu prognostizieren.</div>';
       return;
     }
+    if (!VIS.isForecastable(c.maxDate)) {
+      var d = Math.round(VIS.daysUntil(c.maxDate));
+      box.innerHTML = '<div class="notice notice-info"><span class="notice-icon">📅</span>' +
+        '<div>Die Finsternis liegt ' + d + ' Tage in der Zukunft – Wettermodelle reichen nur ' +
+        VIS.MAX_FORECAST_DAYS + ' Tage. Weiter unten hilft die Klimatologie.</div></div>';
+      return;
+    }
 
+    var btn = $('btnVis');
     btn.disabled = true;
     btn.textContent = '… wird abgerufen';
     box.innerHTML = '';
 
-    var sun = { altitudeDeg: c.maxAltitude, azimuthDeg: c.maxAzimuth };
-
-    window.Visibility.fetchAlongLineOfSight(state.place, sun, c.maxDate)
-      .then(function (r) {
-        btn.disabled = false;
-        btn.textContent = '↻ Neu abrufen';
-        box.innerHTML = visibilityHTML(r);
-      })
-      .catch(function (err) {
-        btn.disabled = false;
-        btn.textContent = '↻ Erneut versuchen';
-        // Offline ist der Normalfall am Finsternistag auf dem Feld, kein Drama.
-        box.innerHTML = '<div class="notice notice-warn"><span class="notice-icon">📡</span>' +
-          '<div>Die Wolkendaten konnten nicht geladen werden – dafür braucht es ' +
-          'Internet. Alles andere auf dieser Seite funktioniert auch ohne.' +
-          '<br><span class="vis-err">' + escapeHTML(String(err.message || err)) + '</span></div></div>';
-      });
-  }
-
-  function escapeHTML(s) {
-    return s.replace(/[&<>"]/g, function (ch) {
-      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch];
+    VIS.analyse(state.place, buildSteps(8)).then(function (r) {
+      visState.data = r;
+      resetBtn('btnVis', '↻ Neu abrufen');
+      box.innerHTML = visHTML(r);
+      drawProfile(r);
+      drawTimeline(r);
+    }).catch(function (err) {
+      netError(box, err, 'btnVis', '↻ Erneut versuchen');
     });
   }
 
-  function visibilityHTML(r) {
-    var pct = Math.round(r.result.chance * 100);
+  function visHTML(r) {
     var h = '<div class="vis-head vis-' + r.rating.key + '">' +
-      '<div class="vis-pct">' + pct + ' %</div>' +
+      '<div class="vis-pct">' + pctText(r.peak.chance) + '</div>' +
       '<div class="vis-rate">' + r.rating.label + '</div></div>';
-
     h += '<p class="vis-why">' + escapeHTML(r.explanation) + '</p>';
 
+    // --- Faktoren: wie kommt die Zahl zustande? ---
+    h += '<h3 class="vis-h3">Wie kommt diese Zahl zustande?</h3><div class="vis-fac">';
+    var f = r.peak.factors;
+    var facs = [
+      ['Freie Sicht durch die Wolken', f.clouds],
+      ['Horizontnähe', f.horizon],
+      ['Dunst', f.haze],
+      ['Niederschlag', f.precipitation]
+    ];
+    facs.forEach(function (x) {
+      var v = Math.max(0, Math.min(1, x[1]));
+      h += '<div class="fac-row"><span class="fac-lab">' + x[0] + '</span>' +
+        '<span class="fac-bar"><i style="width:' + (v * 100).toFixed(1) + '%"></i></span>' +
+        '<span class="fac-val">×' + v.toFixed(2).replace('.', ',') + '</span></div>';
+    });
+    h += '</div><p class="vis-foot">Die vier Faktoren werden multipliziert: ' +
+      facs.map(function (x) { return Math.max(0, Math.min(1, x[1])).toFixed(2).replace('.', ','); }).join(' × ') +
+      ' = ' + r.peak.chance.toFixed(2).replace('.', ',') + '</p>';
+
+    // --- Sichtlinie ---
+    h += '<h3 class="vis-h3">Sichtlinie zur Sonne</h3>';
     h += '<div class="vis-rows">';
-    for (var i = 0; i < r.lineOfSight.length; i++) {
-      var p = r.lineOfSight[i];
+    (r.lineOfSight || []).forEach(function (p) {
       var cover = p.cover == null ? '–' : Math.round(p.cover) + ' %';
       var dist = isFinite(p.rawDistanceKm)
-        ? Math.round(p.distanceKm) + ' km' + (p.capped ? '+' : '')
-        : '–';
-      h += '<div class="vis-row">' +
-        '<span class="vis-layer">' + p.layer.label + '</span>' +
+        ? Math.round(p.distanceKm) + ' km' + (p.capped ? '+' : '') : '–';
+      h += '<div class="vis-row"><span class="vis-layer">' + p.layer.label + '</span>' +
         '<span class="vis-dist">' + dist + '</span>' +
         '<span class="vis-cover">' + cover + '</span></div>';
-    }
-    h += '</div>';
-
-    var t = r.validAt.toLocaleTimeString('de-DE', {
-      hour: '2-digit', minute: '2-digit', timeZone: state.place.tz
     });
-    h += '<p class="vis-foot">Bewölkung am Durchstoßpunkt jeder Schicht, ' +
-      'Modellstunde ' + t + '. Quelle: Open-Meteo.</p>';
+    h += '</div><div class="prof-wrap"><canvas id="profCanvas"></canvas></div>';
+    h += '<p class="vis-foot">Seitenansicht: der Sehstrahl vom Beobachter (links) zur Sonne, ' +
+      'und wo er die drei Wolkenstockwerke durchstößt.</p>';
+
+    // --- Verlauf ---
+    h += '<h3 class="vis-h3">Verlauf der Sichtchance</h3>';
+    h += '<div class="tl-wrap"><canvas id="tlCanvas"></canvas></div>';
+    h += '<details class="vis-det"><summary>Werte als Tabelle</summary><div class="vis-rows">';
+    r.timeline.forEach(function (e) {
+      h += '<div class="vis-row' + (e.isPeak ? ' is-peak' : '') + '">' +
+        '<span class="vis-layer">' + fmtTime(e.date) + (e.isPeak ? ' · Maximum' : '') + '</span>' +
+        '<span class="vis-dist">' + fmtDeg(e.altitudeDeg) + '</span>' +
+        '<span class="vis-cover">' + pctText(e.chance) + '</span></div>';
+    });
+    h += '</div></details>';
+
+    // --- Modellvergleich ---
+    if (r.perModel && r.perModel.length > 1) {
+      h += '<h3 class="vis-h3">Wie einig sind sich die Wettermodelle?</h3><div class="vis-fac">';
+      r.perModel.forEach(function (m) {
+        h += '<div class="fac-row' + (m.model.primary ? ' is-primary' : '') + '">' +
+          '<span class="fac-lab">' + m.model.label + '</span>' +
+          '<span class="fac-bar"><i style="width:' + (m.chance * 100).toFixed(1) + '%"></i></span>' +
+          '<span class="fac-val">' + pctText(m.chance) + '</span></div>';
+      });
+      h += '</div>';
+      if (r.spread) {
+        h += '<p class="vis-foot">Spanne ' + pctText(r.spread.min) + ' bis ' +
+          pctText(r.spread.max) + ', Median ' + pctText(r.spread.median) +
+          ' – Übereinstimmung <strong>' + r.spread.agreement + '</strong>. ' +
+          (r.spread.agreement === 'gering'
+            ? 'Die Modelle sind sich uneins; nimm die Spanne ernster als die Einzelzahl.'
+            : 'Je enger die Spanne, desto belastbarer die Zahl.') + '</p>';
+      }
+    }
+
+    // --- Wetterlage am Ort ---
+    var co = r.conditions;
+    if (co) {
+      h += '<h3 class="vis-h3">Wetter an deinem Ort</h3><div class="grid2">';
+      var tiles = [
+        [co.totalCloudCover == null ? '–' : Math.round(co.totalCloudCover) + ' %', 'Bewölkung gesamt'],
+        [co.temperature == null ? '–' : Math.round(co.temperature) + ' °C', 'Temperatur'],
+        [co.wind == null ? '–' : Math.round(co.wind) + ' km/h', 'Wind'],
+        [co.visibility == null ? '–' : Math.round(co.visibility / 1000) + ' km', 'Sichtweite']
+      ];
+      tiles.forEach(function (t) {
+        h += '<div class="stat"><div class="stat-val">' + t[0] + '</div>' +
+          '<div class="stat-lab">' + t[1] + '</div></div>';
+      });
+      h += '</div>';
+    }
+
+    h += '<p class="vis-foot">Bewölkung am Durchstoßpunkt jeder Schicht, stündlich ' +
+      'interpoliert. Quelle: Open-Meteo.</p>';
     return h;
+  }
+
+  /* --- Seitenprofil der Sichtlinie ---------------------------------- */
+
+  function drawProfile(r) {
+    var canvas = $('profCanvas');
+    if (!canvas) return;
+    var W = canvas.getBoundingClientRect().width;
+    if (!W) return;
+    var H = Math.max(140, Math.min(200, W * 0.5));
+    canvas.style.height = H + 'px';
+    var ctx = prepCanvas(canvas, W, H);
+
+    var los = r.lineOfSight || [];
+    var maxKm = 0;
+    los.forEach(function (l) { maxKm = Math.max(maxKm, l.distanceKm); });
+    maxKm = Math.max(maxKm * 1.1, 40);
+    var maxH = 12; // km
+
+    var padL = 34, padR = 12, padT = 10, padB = 24;
+    var pw = W - padL - padR, ph = H - padT - padB;
+    var X = function (km) { return padL + pw * (km / maxKm); };
+    var Y = function (km) { return padT + ph * (1 - km / maxH); };
+
+    // Wolkenstockwerke als Baender, Deckkraft nach Bedeckungsgrad
+    var bands = [[0, 3, 'low'], [3, 8, 'mid'], [8, 12, 'high']];
+    bands.forEach(function (b) {
+      var entry = null;
+      los.forEach(function (l) { if (l.layer.key === b[2]) entry = l; });
+      var cover = entry && entry.cover != null ? entry.cover / 100 : 0;
+      ctx.fillStyle = 'rgba(170, 200, 240,' + (0.06 + cover * 0.42).toFixed(3) + ')';
+      ctx.fillRect(padL, Y(b[1]), pw, Y(b[0]) - Y(b[1]));
+      ctx.fillStyle = 'rgba(150,175,215,0.75)';
+      ctx.font = '9px ui-monospace, monospace';
+      ctx.textAlign = 'left';
+      ctx.fillText(entry ? entry.layer.shortLabel : '', padL + 4, Y(b[1]) + 11);
+    });
+
+    // Boden
+    ctx.strokeStyle = 'rgba(120,160,230,0.45)';
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(padL, Y(0)); ctx.lineTo(W - padR, Y(0)); ctx.stroke();
+
+    // Sehstrahl: gekruemmt, weil der Boden unter ihm wegfaellt
+    ctx.strokeStyle = '#ffb347';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([5, 4]);
+    ctx.beginPath();
+    for (var i = 0; i <= 60; i++) {
+      var km = maxKm * i / 60;
+      // Umkehrung von groundDistanceToAltitude: Hoehe bei gegebener Bodendistanz
+      var ang = km / VIS.EARTH_RADIUS_KM;
+      var alt = r.peak.altitudeDeg * Math.PI / 180;
+      var hh = VIS.EARTH_RADIUS_KM * (Math.cos(ang) + Math.sin(ang) * Math.tan(alt + ang / 2)) - VIS.EARTH_RADIUS_KM;
+      var yy = Y(Math.max(0, Math.min(maxH, hh)));
+      if (i === 0) ctx.moveTo(X(0), Y(0)); else ctx.lineTo(X(km), yy);
+    }
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Durchstosspunkte
+    los.forEach(function (l) {
+      var x = X(l.distanceKm), y = Y(l.layer.heightM / 1000);
+      ctx.fillStyle = l.cover != null && l.cover > 50 ? '#ff5c7a' : '#4ee1ff';
+      ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = 'rgba(232,238,255,0.9)';
+      ctx.font = '9px ui-monospace, monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText(l.cover == null ? '–' : Math.round(l.cover) + '%', x, y - 8);
+    });
+
+    // Beobachter
+    ctx.fillStyle = '#e8eeff';
+    ctx.beginPath(); ctx.arc(X(0), Y(0), 3.5, 0, Math.PI * 2); ctx.fill();
+
+    // Achsen
+    ctx.fillStyle = 'rgba(150,175,215,0.8)';
+    ctx.font = '9px ui-monospace, monospace';
+    ctx.textAlign = 'right';
+    ctx.fillText('12 km', padL - 5, Y(12) + 8);
+    ctx.fillText('0', padL - 5, Y(0) + 3);
+    ctx.textAlign = 'center';
+    ctx.fillText(Math.round(maxKm) + ' km', W - padR - 14, H - 8);
+    ctx.fillText('Entfernung →', padL + pw / 2, H - 8);
+  }
+
+  /* --- Verlaufsdiagramm --------------------------------------------- */
+
+  function drawTimeline(r) {
+    var canvas = $('tlCanvas');
+    if (!canvas) return;
+    var W = canvas.getBoundingClientRect().width;
+    if (!W) return;
+    var H = Math.max(150, Math.min(210, W * 0.52));
+    canvas.style.height = H + 'px';
+    var ctx = prepCanvas(canvas, W, H);
+
+    var tl = r.timeline;
+    if (!tl.length) return;
+    var t0 = tl[0].date.getTime(), t1 = tl[tl.length - 1].date.getTime();
+    var span = Math.max(1, t1 - t0);
+    var padL = 34, padR = 12, padT = 12, padB = 26;
+    var pw = W - padL - padR, ph = H - padT - padB;
+    var X = function (d) { return padL + pw * ((d.getTime() - t0) / span); };
+    var Y = function (c) { return padT + ph * (1 - c); };
+
+    // Raster
+    ctx.strokeStyle = 'rgba(120,160,230,0.16)';
+    ctx.lineWidth = 1;
+    ctx.fillStyle = 'rgba(150,175,215,0.8)';
+    ctx.font = '9px ui-monospace, monospace';
+    ctx.textAlign = 'right';
+    [0, 0.25, 0.5, 0.75, 1].forEach(function (v) {
+      var y = Y(v);
+      ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(W - padR, y); ctx.stroke();
+      ctx.fillText(Math.round(v * 100) + '%', padL - 5, y + 3);
+    });
+
+    // Flaeche
+    var grad = ctx.createLinearGradient(0, padT, 0, padT + ph);
+    grad.addColorStop(0, 'rgba(78,225,255,0.35)');
+    grad.addColorStop(1, 'rgba(78,225,255,0.02)');
+    ctx.beginPath();
+    ctx.moveTo(X(tl[0].date), Y(0));
+    tl.forEach(function (e) { ctx.lineTo(X(e.date), Y(e.chance)); });
+    ctx.lineTo(X(tl[tl.length - 1].date), Y(0));
+    ctx.closePath();
+    ctx.fillStyle = grad; ctx.fill();
+
+    // Linie
+    ctx.strokeStyle = '#4ee1ff';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    tl.forEach(function (e, i) {
+      var x = X(e.date), y = Y(e.chance);
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+
+    // Sonnenuntergang
+    var c = state.circ;
+    if (c.sunsetDuring && c.sunsetDuring.getTime() > t0 && c.sunsetDuring.getTime() < t1) {
+      var xs = X(c.sunsetDuring);
+      ctx.strokeStyle = 'rgba(255,92,122,0.8)';
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath(); ctx.moveTo(xs, padT); ctx.lineTo(xs, padT + ph); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = '#ff5c7a';
+      ctx.textAlign = 'center';
+      ctx.fillText('SU', xs, padT - 2);
+    }
+
+    // Maximum
+    tl.forEach(function (e) {
+      if (!e.isPeak) return;
+      var x = X(e.date), y = Y(e.chance);
+      ctx.fillStyle = '#ffb347';
+      ctx.beginPath(); ctx.arc(x, y, 4.5, 0, Math.PI * 2); ctx.fill();
+      ctx.textAlign = 'center';
+      ctx.fillText('Max', x, y - 9);
+    });
+
+    // Zeitachse
+    ctx.fillStyle = 'rgba(150,175,215,0.8)';
+    ctx.textAlign = 'left';
+    ctx.fillText(fmtTime(tl[0].date), padL, H - 8);
+    ctx.textAlign = 'right';
+    ctx.fillText(fmtTime(tl[tl.length - 1].date), W - padR, H - 8);
+  }
+
+  /* --- Klimatologie -------------------------------------------------- */
+
+  function loadClimatology() {
+    var c = state.circ;
+    var box = $('climaResult');
+    if (!c || !c.hasEclipse) {
+      box.innerHTML = '<div class="notice notice-info">An diesem Ort ist die Finsternis nicht zu sehen.</div>';
+      return;
+    }
+    var btn = $('btnClima');
+    btn.disabled = true;
+    btn.textContent = '… 0 / 20 Jahre';
+    box.innerHTML = '';
+
+    var sun = { altitudeDeg: c.maxAltitude, azimuthDeg: c.maxAzimuth };
+    VIS.analyseClimatology(state.place, sun, c.maxDate, {
+      onProgress: function (done, total) { btn.textContent = '… ' + done + ' / ' + total + ' Jahre'; }
+    }).then(function (r) {
+      resetBtn('btnClima', '↻ Neu auswerten');
+      if (!r) {
+        box.innerHTML = '<div class="notice notice-info">Keine Archivdaten für diesen Ort.</div>';
+        return;
+      }
+      visState.clima = r;
+      box.innerHTML = climaHTML(r);
+      drawClima(r);
+    }).catch(function (err) {
+      netError(box, err, 'btnClima', '↻ Erneut versuchen');
+    });
+  }
+
+  function climaHTML(r) {
+    var h = '<div class="vis-head"><div class="vis-pct">' + pctText(r.median) + '</div>' +
+      '<div class="vis-rate">Median über ' + r.perYear.length + ' Jahre</div></div>';
+    h += '<p class="vis-why">In <strong>' + pctText(r.goodShare) + '</strong> der ausgewerteten Fälle ' +
+      'wäre die Sonne gut zu sehen gewesen (Chance über 60 %). Mittleres Viertel: ' +
+      pctText(r.p25) + ' bis ' + pctText(r.p75) + '.</p>';
+    h += '<div class="clima-wrap"><canvas id="climaCanvas"></canvas></div>';
+    h += '<p class="vis-foot">Ein Balken je Jahr: mittlere Sichtchance am ' +
+      'Kalendertag der Finsternis (±3 Tage), zur selben Tageszeit. ' +
+      r.samples + ' Stundenwerte aus dem ERA5-Archiv.</p>';
+    return h;
+  }
+
+  function drawClima(r) {
+    var canvas = $('climaCanvas');
+    if (!canvas) return;
+    var W = canvas.getBoundingClientRect().width;
+    if (!W) return;
+    var H = 130;
+    canvas.style.height = H + 'px';
+    var ctx = prepCanvas(canvas, W, H);
+
+    var padL = 30, padR = 8, padT = 8, padB = 22;
+    var pw = W - padL - padR, ph = H - padT - padB;
+    var n = r.perYear.length || 1;
+    var bw = pw / n;
+
+    ctx.strokeStyle = 'rgba(120,160,230,0.16)';
+    ctx.fillStyle = 'rgba(150,175,215,0.8)';
+    ctx.font = '9px ui-monospace, monospace';
+    ctx.textAlign = 'right';
+    [0, 0.5, 1].forEach(function (v) {
+      var y = padT + ph * (1 - v);
+      ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(W - padR, y); ctx.stroke();
+      ctx.fillText(Math.round(v * 100) + '%', padL - 4, y + 3);
+    });
+
+    r.perYear.forEach(function (y, i) {
+      var x = padL + bw * i;
+      var hgt = ph * y.mean;
+      ctx.fillStyle = y.mean > 0.6 ? 'rgba(67,232,160,0.75)'
+        : y.mean > 0.4 ? 'rgba(255,179,71,0.75)' : 'rgba(255,92,122,0.7)';
+      ctx.fillRect(x + bw * 0.15, padT + ph - hgt, bw * 0.7, hgt);
+    });
+
+    // Median als Linie
+    var ym = padT + ph * (1 - r.median);
+    ctx.strokeStyle = 'rgba(232,238,255,0.7)';
+    ctx.setLineDash([4, 3]);
+    ctx.beginPath(); ctx.moveTo(padL, ym); ctx.lineTo(W - padR, ym); ctx.stroke();
+    ctx.setLineDash([]);
+
+    ctx.fillStyle = 'rgba(150,175,215,0.8)';
+    ctx.textAlign = 'left';
+    if (r.perYear.length) ctx.fillText(r.perYear[0].year, padL, H - 7);
+    ctx.textAlign = 'right';
+    if (r.perYear.length) ctx.fillText(r.perYear[r.perYear.length - 1].year, W - padR, H - 7);
+  }
+
+  /* --- Orte vergleichen ---------------------------------------------- */
+
+  function setupCompare() {
+    var input = $('cmpSearch');
+    var box = $('cmpSuggestions');
+    if (!input) return;
+
+    function close() { box.innerHTML = ''; }
+
+    input.addEventListener('input', function () {
+      var v = input.value.trim();
+      if (v.length < 2) { close(); return; }
+      box.innerHTML = '';
+      window.Cities.search(v, 6).forEach(function (c) {
+        var d = document.createElement('div');
+        d.className = 'sugg';
+        d.innerHTML = '<span>' + c.name + '</span><span class="c">' + c.countryName + '</span>';
+        d.addEventListener('mousedown', function (ev) {
+          ev.preventDefault();
+          addCompare(c);
+          input.value = '';
+          close();
+        });
+        box.appendChild(d);
+      });
+    });
+    input.addEventListener('blur', function () { setTimeout(close, 120); });
+  }
+
+  function addCompare(c) {
+    for (var i = 0; i < visState.compare.length; i++) {
+      if (visState.compare[i].name === c.name) return;
+    }
+    visState.compare.push({ name: c.name, lat: c.lat, lon: c.lon, height: c.height, tz: c.tz });
+    renderCompareChips();
+  }
+
+  function renderCompareChips() {
+    var box = $('cmpChips');
+    box.innerHTML = '';
+    visState.compare.forEach(function (p, i) {
+      var chip = document.createElement('span');
+      chip.className = 'chip';
+      chip.innerHTML = escapeHTML(p.name) + ' <button type="button" aria-label="Entfernen">×</button>';
+      chip.querySelector('button').addEventListener('click', function () {
+        visState.compare.splice(i, 1);
+        renderCompareChips();
+      });
+      box.appendChild(chip);
+    });
+  }
+
+  /*
+   * Vergleicht den aktuellen Standort mit den gewaehlten Orten. Fuer jeden Ort
+   * werden eigene oertliche Umstaende gerechnet - das Maximum faellt anderswo
+   * auf eine andere Uhrzeit und eine andere Sonnenhoehe.
+   */
+  function loadCompare() {
+    var box = $('cmpResult');
+    var places = [state.place].concat(visState.compare);
+    if (places.length < 2) {
+      box.innerHTML = '<div class="notice notice-info">Such dir oben mindestens einen ' +
+        'weiteren Ort dazu.</div>';
+      return;
+    }
+    var btn = $('btnCmp');
+    btn.disabled = true;
+    btn.textContent = '…';
+    box.innerHTML = '';
+
+    var jobs = places.map(function (p) {
+      var circ = EC.localCircumstances(p.lat, p.lon, p.height || 0, EL);
+      if (!circ.hasEclipse) return Promise.resolve({ place: p, circ: circ, chance: null });
+      var obs = EC.makeObserver(p.lat, p.lon, p.height || 0);
+      var st = EC.stateAt(EL, obs, circ.maxT);
+      var step = [{
+        date: circ.maxDate, altitudeDeg: st.altitudeDeg,
+        azimuthDeg: st.azimuthDeg, isPeak: true
+      }];
+      return VIS.analyse(p, step, { models: [VIS.PRIMARY_MODEL] })
+        .then(function (r) { return { place: p, circ: circ, chance: r.peak.chance, r: r }; });
+    });
+
+    Promise.all(jobs).then(function (rows) {
+      resetBtn('btnCmp', 'Vergleichen');
+      rows.sort(function (a, b) { return (b.chance || 0) - (a.chance || 0); });
+      var h = '<div class="vis-rows">';
+      rows.forEach(function (row, i) {
+        var ch = row.chance === null ? '–' : pctText(row.chance);
+        h += '<div class="vis-row' + (i === 0 && row.chance !== null ? ' is-best' : '') + '">' +
+          '<span class="vis-layer">' + escapeHTML(row.place.name) +
+          (row.place === state.place ? ' <em>(hier)</em>' : '') + '</span>' +
+          '<span class="vis-dist">' + (row.circ.hasEclipse ? fmtPct(row.circ.obscuration) : '–') + '</span>' +
+          '<span class="vis-cover">' + ch + '</span></div>';
+      });
+      h += '</div><p class="vis-foot">Mitte: Bedeckungsgrad, rechts: Sichtchance im ' +
+        'Maximum des jeweiligen Ortes. Sortiert nach Sichtchance.</p>';
+      box.innerHTML = h;
+    }).catch(function (err) {
+      netError(box, err, 'btnCmp', 'Vergleichen');
+    });
+  }
+
+  /* --- Live-Ansicht -------------------------------------------------- */
+
+  /*
+   * Zeigt waehrend der Finsternis den aktuellen Stand: laufende Phase,
+   * Fortschritt und die Zeit bis zum naechsten Ereignis. Ausserhalb des
+   * Finsternisfensters sagt sie, wann es losgeht.
+   */
+  function renderLive() {
+    var box = $('liveBody');
+    if (!box) return;
+    var c = state.circ;
+    if (!c || !c.hasEclipse) {
+      box.innerHTML = '<p class="vis-intro">An diesem Ort ist von der Finsternis nichts zu sehen.</p>';
+      return;
+    }
+
+    var now = new Date();
+    var t = nowT();
+    var events = [];
+    if (c.c1T !== null) events.push(['1. Kontakt', c.c1T]);
+    if (c.c2T !== null) events.push(['Totalität beginnt', c.c2T]);
+    events.push(['Maximum', c.maxT]);
+    if (c.c3T !== null) events.push(['Totalität endet', c.c3T]);
+    if (c.c4T !== null) events.push(['4. Kontakt', c.c4T]);
+
+    var next = null;
+    for (var i = 0; i < events.length; i++) {
+      if (events[i][1] > t) { next = events[i]; break; }
+    }
+
+    var running = c.c1T !== null && c.c4T !== null && t >= c.c1T && t <= c.c4T;
+    var st = EC.stateAt(EL, state.obs, t);
+    var progress = running ? (t - c.c1T) / (c.c4T - c.c1T) : (t < c.c1T ? 0 : 1);
+
+    var h = '<div class="live-state ' + (running ? 'is-running' : '') + '">' +
+      '<span class="live-dot"></span>' +
+      (running ? 'Die Finsternis läuft gerade'
+               : t < (c.c1T === null ? c.maxT : c.c1T) ? 'Noch nicht begonnen' : 'Vorbei') +
+      '</div>';
+
+    h += '<div class="live-bar"><i style="width:' +
+      (Math.max(0, Math.min(1, progress)) * 100).toFixed(1) + '%"></i></div>';
+
+    h += '<div class="readout" style="margin-top:12px">' +
+      '<div class="ro"><div class="ro-val">' + fmtPct(st.obscuration) + '</div><div class="ro-lab">bedeckt jetzt</div></div>' +
+      '<div class="ro"><div class="ro-val">' + fmtDeg(st.altitudeDeg) + '</div><div class="ro-lab">Sonnenhöhe</div></div>' +
+      '<div class="ro"><div class="ro-val">' + compassName(st.azimuthDeg) + '</div><div class="ro-lab">Richtung</div></div>' +
+      '</div>';
+
+    if (next) {
+      var secs = Math.max(0, (EC.tToDate(EL, next[1]) - now) / 1000);
+      h += '<div class="live-next"><span>Nächstes: <strong>' + next[0] + '</strong></span>' +
+        '<span class="live-timer">in ' + fmtDuration(secs) + '</span></div>';
+    } else {
+      h += '<div class="live-next"><span>Die Finsternis ist an deinem Ort vorbei.</span></div>';
+    }
+
+    if (c.sunsetDuring && c.sunsetDuring > now) {
+      h += '<p class="vis-foot">Achtung: Die Sonne geht um ' + fmtTime(c.sunsetDuring) +
+        ' unter, noch während die Finsternis läuft.</p>';
+    }
+    box.innerHTML = h;
   }
 
   /* ==================================================================
@@ -1208,6 +1755,9 @@
     $('btnIcs').addEventListener('click', downloadICS);
     $('btnShare').addEventListener('click', shareResult);
     $('btnVis').addEventListener('click', loadVisibility);
+    $('btnClima').addEventListener('click', loadClimatology);
+    $('btnCmp').addEventListener('click', loadCompare);
+    setupCompare();
 
     drawStarfield();
 
@@ -1228,6 +1778,7 @@
     renderCountdown();
     setInterval(function () {
       renderCountdown();
+      renderLive();
       if (state.live) renderDynamic();
     }, 1000);
 
@@ -1237,6 +1788,8 @@
       resizeTimer = setTimeout(function () {
         drawStarfield();
         renderDynamic();
+        if (visState.data) { drawProfile(visState.data); drawTimeline(visState.data); }
+        if (visState.clima) drawClima(visState.clima);
       }, 150);
     });
 

@@ -14,8 +14,9 @@
  * Fuer jede der drei Wolkenschichten wird deshalb der Punkt berechnet, an dem
  * die Sichtlinie sie durchstoesst, und *dort* das Wetter abgefragt.
  *
- * Der Rechenteil ist frei von Netz und DOM. Nur fetchAlongLineOfSight() geht
- * ins Netz - der Rest der App bleibt offline lauffaehig.
+ * Der Rechenteil ist frei von Netz und DOM und damit direkt pruefbar. Nur
+ * analyse(), analyseClimatology() und fetchForecast() gehen ins Netz, und die
+ * nur auf Knopfdruck - der Rest der App bleibt offline lauffaehig.
  *
  * Portiert aus der Sichtprognose-App (Branch eclipse-visibility-forecast).
  */
@@ -227,93 +228,405 @@
   }
 
   /* ==================================================================
-   * Wetterabruf - der einzige Teil, der Netz braucht
+   * Wetterdaten von Open-Meteo (frei, ohne Schluessel)
+   *
+   * Zwei Quellen: die Vorhersage (bis 16 Tage) fuer die eigentliche Prognose,
+   * und das ERA5-Archiv fuer die Klimatologie, wenn die Finsternis noch
+   * ausserhalb der Vorhersagereichweite liegt.
    * ================================================================== */
 
-  function pad(n) { return (n < 10 ? '0' : '') + n; }
+  var FORECAST_URL = 'https://api.open-meteo.com/v1/forecast';
+  var ARCHIVE_URL = 'https://archive-api.open-meteo.com/v1/archive';
 
-  /** Datum als YYYY-MM-DD in UTC. */
-  function utcDateString(d) {
-    return d.getUTCFullYear() + '-' + pad(d.getUTCMonth() + 1) + '-' + pad(d.getUTCDate());
-  }
+  /** Maximale Vorhersagereichweite von Open-Meteo in Tagen. */
+  var MAX_FORECAST_DAYS = 16;
 
-  /** Volle Stunde in UTC als ISO-Kurzform, wie Open-Meteo sie in hourly.time nutzt. */
-  function utcHourString(d) {
-    return utcDateString(d) + 'T' + pad(d.getUTCHours()) + ':00';
+  var HOURLY_VARIABLES = [
+    'cloud_cover', 'cloud_cover_low', 'cloud_cover_mid', 'cloud_cover_high',
+    'visibility', 'precipitation', 'temperature_2m', 'wind_speed_10m'
+  ];
+
+  /*
+   * Modelle fuer den Vergleich. best_match ist Open-Meteos Mischung aus dem
+   * jeweils besten verfuegbaren Modell und liefert die Hauptzahl; die uebrigen
+   * zeigen, wie einig sich die Modelle sind.
+   */
+  var MODELS = [
+    { id: 'best_match', label: 'Beste Mischung', primary: true },
+    { id: 'ecmwf_ifs025', label: 'ECMWF IFS' },
+    { id: 'icon_seamless', label: 'DWD ICON' },
+    { id: 'gfs_seamless', label: 'NOAA GFS' },
+    { id: 'meteofrance_seamless', label: 'Météo-France' },
+    { id: 'ukmo_seamless', label: 'UK Met Office' }
+  ];
+  var PRIMARY_MODEL = 'best_match';
+
+  function isoDate(d) { return d.toISOString().slice(0, 10); }
+
+  function fetchJson(url, opts) {
+    opts = opts || {};
+    var retries = opts.retries === undefined ? 1 : opts.retries;
+    function attempt(n) {
+      return fetch(url, { signal: opts.signal }).then(function (res) {
+        if (!res.ok) throw new Error('Wetterdienst antwortete mit HTTP ' + res.status);
+        return res.json();
+      }).catch(function (err) {
+        if (err.name === 'AbortError' || n >= retries) throw err;
+        return new Promise(function (r) { setTimeout(r, 800); }).then(function () {
+          return attempt(n + 1);
+        });
+      });
+    }
+    return attempt(0);
   }
 
   /*
-   * Holt die Bewoelkung an den Durchstosspunkten der Sichtlinie.
-   *
-   * Alle Punkte gehen in *einen* Request - Open-Meteo nimmt mehrere Koordinaten
-   * kommagetrennt entgegen und antwortet mit einem Array in derselben
-   * Reihenfolge. Der letzte Punkt ist der Beobachterstandort selbst; von dort
-   * kommen Niederschlag und Sichtweite, die ja am Auge wirken, nicht an der Wolke.
-   *
-   * Die Wettermodelle liefern Stundenwerte; genommen wird die naechstliegende
-   * volle Stunde zum Maximum.
+   * Bei mehreren Modellen haengt Open-Meteo den Modellnamen an die Variable an
+   * (cloud_cover_low_icon_seamless). Das normalisieren wir wieder auf
+   * { modelId: { time, cloud_cover_low, ... } }.
    */
-  function fetchAlongLineOfSight(place, sun, date, opts) {
+  function parseSeries(hourly, modelIds) {
+    var time = ((hourly && hourly.time) || []).map(function (t) { return new Date(t + 'Z'); });
+    var out = {};
+    modelIds.forEach(function (model) {
+      var series = { time: time };
+      HOURLY_VARIABLES.forEach(function (v) {
+        var withModel = hourly && hourly[v + '_' + model];
+        series[v] = withModel !== undefined && withModel !== null
+          ? withModel
+          : (hourly && hourly[v]) || null;
+      });
+      out[model] = series;
+    });
+    return out;
+  }
+
+  /** Vorhersage fuer viele Punkte und Modelle in einem einzigen Aufruf. */
+  function fetchForecast(points, date, opts) {
     opts = opts || {};
-    var los = lineOfSight(place, sun);
+    var models = opts.models || MODELS.map(function (m) { return m.id; });
+    // Ein Tag Puffer nach beiden Seiten, damit die Interpolation an den Raendern klappt.
+    var from = isoDate(new Date(date.getTime() - 86400000));
+    var to = isoDate(new Date(date.getTime() + 86400000));
 
-    var lats = los.map(function (p) { return p.point.lat.toFixed(4); });
-    var lons = los.map(function (p) { return p.point.lon.toFixed(4); });
-    lats.push(place.lat.toFixed(4));
-    lons.push(place.lon.toFixed(4));
+    var url = FORECAST_URL +
+      '?latitude=' + points.map(function (p) { return p.lat.toFixed(4); }).join(',') +
+      '&longitude=' + points.map(function (p) { return p.lon.toFixed(4); }).join(',') +
+      '&hourly=' + HOURLY_VARIABLES.join(',') +
+      '&models=' + models.join(',') +
+      '&timezone=UTC&start_date=' + from + '&end_date=' + to;
 
-    // Auf die naechste volle Stunde runden
-    var target = new Date(Math.round(date.getTime() / 3600000) * 3600000);
-    var day = utcDateString(target);
+    return fetchJson(url, opts).then(function (data) {
+      var list = Array.isArray(data) ? data : [data];
+      return list.map(function (entry, i) {
+        return {
+          latitude: entry.latitude === undefined ? points[i].lat : entry.latitude,
+          longitude: entry.longitude === undefined ? points[i].lon : entry.longitude,
+          elevation: entry.elevation === undefined ? null : entry.elevation,
+          series: parseSeries(entry.hourly, models)
+        };
+      });
+    });
+  }
 
-    var url = 'https://api.open-meteo.com/v1/forecast' +
-      '?latitude=' + lats.join(',') +
-      '&longitude=' + lons.join(',') +
-      '&hourly=cloud_cover_low,cloud_cover_mid,cloud_cover_high,precipitation,visibility' +
-      '&start_date=' + day + '&end_date=' + day +
-      '&timezone=UTC';
+  /*
+   * Wert einer stuendlichen Reihe zu einem beliebigen Zeitpunkt, linear
+   * interpoliert. null, wenn der Zeitpunkt ausserhalb liegt oder die
+   * Nachbarwerte fehlen - nicht jedes Modell liefert jede Variable.
+   */
+  function sampleAt(series, variable, date) {
+    var values = series && series[variable];
+    var times = series && series.time;
+    if (!values || !times || times.length === 0) return null;
+    var t = date.getTime();
+    if (t < times[0].getTime() || t > times[times.length - 1].getTime()) return null;
 
-    return fetch(url, { signal: opts.signal }).then(function (res) {
-      if (!res.ok) throw new Error('Wetterabruf fehlgeschlagen (HTTP ' + res.status + ')');
-      return res.json();
-    }).then(function (data) {
-      var series = Array.isArray(data) ? data : [data];
-      if (series.length < los.length + 1) throw new Error('Unerwartete Antwort der Wetter-API');
+    var step = times.length > 1 ? times[1] - times[0] : 3600000;
+    var i = Math.floor((t - times[0].getTime()) / step);
+    i = Math.min(Math.max(i, 0), times.length - 2);
 
-      var stamp = utcHourString(target);
+    var v0 = values[i], v1 = values[i + 1];
+    if (v0 === null || v0 === undefined) return null;
+    if (v1 === null || v1 === undefined) return v0;
+    var f = (t - times[i].getTime()) / (times[i + 1].getTime() - times[i].getTime());
+    return v0 + (v1 - v0) * f;
+  }
 
-      function valueAt(entry, variable) {
-        var h = entry && entry.hourly;
-        if (!h || !h.time) return null;
-        var i = h.time.indexOf(stamp);
-        if (i < 0) return null;
-        var arr = h[variable];
-        return arr && arr[i] != null ? arr[i] : null;
+  /*
+   * Fasst die Einzelergebnisse mehrerer Wettermodelle zu Median und Streuung
+   * zusammen. Die Streuung ist das ehrlichere Mass fuer die Prognosesicherheit
+   * als jede Einzelvorhersage.
+   */
+  function aggregate(chances) {
+    var values = chances.filter(function (c) { return isFinite(c); })
+      .sort(function (a, b) { return a - b; });
+    if (values.length === 0) return null;
+    var mid = Math.floor(values.length / 2);
+    var median = values.length % 2 ? values[mid] : (values[mid - 1] + values[mid]) / 2;
+    var min = values[0], max = values[values.length - 1];
+    var spread = max - min;
+    return {
+      median: median, min: min, max: max, spread: spread, count: values.length,
+      agreement: spread < 0.15 ? 'hoch' : spread < 0.35 ? 'mittel' : 'gering'
+    };
+  }
+
+  /** Tage bis zur Finsternis (kann negativ sein). */
+  function daysUntil(date, now) {
+    return (date - (now || new Date())) / 86400000;
+  }
+
+  /** Liegt die Finsternis in Reichweite der Wettermodelle? */
+  function isForecastable(date, now) {
+    var d = daysUntil(date, now);
+    return d >= -1 && d <= MAX_FORECAST_DAYS - 1;
+  }
+
+  /*
+   * Baut die Abfragepunkte auf: der Standort selbst (Index 0) und je Zeitpunkt
+   * die drei Durchstosspunkte. Steht die Sonne unter dem Horizont, entfaellt
+   * die Sichtlinie - dann ist ohnehin nichts zu sehen.
+   */
+  function buildSamplePoints(place, steps) {
+    var points = [{ lat: place.lat, lon: place.lon }];
+    var built = steps.map(function (st) {
+      if (st.altitudeDeg <= 0) return { step: st, los: null, indices: null };
+      var los = lineOfSight(place, { altitudeDeg: Math.max(st.altitudeDeg, 0), azimuthDeg: st.azimuthDeg });
+      var indices = {};
+      los.forEach(function (entry) {
+        indices[entry.layer.key] = points.length;
+        points.push(entry.point);
+      });
+      return { step: st, los: los, indices: indices };
+    });
+    return { points: points, built: built };
+  }
+
+  function cloudsFor(entry, results, model) {
+    var clouds = {};
+    CLOUD_LAYERS.forEach(function (layer) {
+      var idx = entry.indices ? entry.indices[layer.key] : undefined;
+      var series = idx === undefined ? null : (results[idx] && results[idx].series[model]);
+      var value = series ? sampleAt(series, layer.variable, entry.step.date) : null;
+      clouds[layer.key] = value === null ? 0 : value;
+      clouds[layer.key + '_missing'] = value === null;
+    });
+    return clouds;
+  }
+
+  /*
+   * Vollstaendige Analyse: Verlauf der Sichtchance ueber die Finsternis,
+   * Modellvergleich zum Maximum und die Wetterlage am Standort.
+   *
+   * steps ist eine Liste { date, altitudeDeg, azimuthDeg, isPeak, label },
+   * die der Aufrufer aus der Finsternisgeometrie erzeugt.
+   */
+  function analyse(place, steps, opts) {
+    opts = opts || {};
+    var prep = buildSamplePoints(place, steps);
+
+    var peakStep = null;
+    for (var k = 0; k < steps.length; k++) if (steps[k].isPeak) peakStep = steps[k];
+    var peakDate = (peakStep || steps[0]).date;
+
+    return fetchForecast(prep.points, peakDate, opts).then(function (results) {
+      var observer = results[0] && results[0].series[PRIMARY_MODEL];
+
+      function chanceFor(entry, model) {
+        var obs = results[0] && results[0].series[model];
+        var clouds = cloudsFor(entry, results, model);
+        var prec = obs ? sampleAt(obs, 'precipitation', entry.step.date) : null;
+        var r = visibilityChance(clouds, {
+          sunAltitude: entry.step.altitudeDeg,
+          precipitation: prec === null ? 0 : prec,
+          visibility: obs ? sampleAt(obs, 'visibility', entry.step.date) : null
+        });
+        r.clouds = clouds;
+        return r;
       }
 
-      // Jede Schicht bringt ihren Bedeckungsgrad von *ihrem* Durchstosspunkt mit
-      var clouds = {};
-      for (var i = 0; i < los.length; i++) {
-        clouds[los[i].layer.key] = valueAt(series[i], los[i].layer.variable);
-        los[i].cover = clouds[los[i].layer.key];
-      }
-
-      var here = series[los.length];
-      var result = visibilityChance(clouds, {
-        sunAltitude: sun.altitudeDeg,
-        precipitation: valueAt(here, 'precipitation') || 0,
-        visibility: valueAt(here, 'visibility')
+      // Verlauf nach dem Hauptmodell
+      var timeline = prep.built.map(function (entry) {
+        var r = chanceFor(entry, PRIMARY_MODEL);
+        // Bedeckung an den Punkt haengen, damit die Tabelle sie zeigen kann
+        if (entry.los) {
+          entry.los.forEach(function (l) { l.cover = r.clouds[l.layer.key]; });
+        }
+        return {
+          date: entry.step.date,
+          label: entry.step.label,
+          altitudeDeg: entry.step.altitudeDeg,
+          azimuthDeg: entry.step.azimuthDeg,
+          isPeak: !!entry.step.isPeak,
+          los: entry.los,
+          chance: r.chance,
+          factors: r.factors,
+          perLayer: r.perLayer,
+          clouds: r.clouds,
+          belowHorizon: r.belowHorizon
+        };
       });
 
+      var peakEntry = null, peakBuilt = null;
+      for (var i = 0; i < timeline.length; i++) {
+        if (timeline[i].isPeak) { peakEntry = timeline[i]; peakBuilt = prep.built[i]; }
+      }
+      if (!peakEntry) { peakEntry = timeline[0]; peakBuilt = prep.built[0]; }
+
+      // Dasselbe je Modell - daraus entsteht das Vertrauensmass
+      var perModel = [];
+      MODELS.forEach(function (m) {
+        var clouds = cloudsFor(peakBuilt, results, m.id);
+        var any = CLOUD_LAYERS.some(function (l) { return !clouds[l.key + '_missing']; });
+        if (!any) return;
+        var r = chanceFor(peakBuilt, m.id);
+        perModel.push({ model: m, chance: r.chance, clouds: r.clouds });
+      });
+
+      var spread = aggregate(perModel
+        .filter(function (m) { return m.model.id !== PRIMARY_MODEL; })
+        .map(function (m) { return m.chance; }));
+
+      var conditions = observer ? {
+        temperature: sampleAt(observer, 'temperature_2m', peakDate),
+        wind: sampleAt(observer, 'wind_speed_10m', peakDate),
+        precipitation: sampleAt(observer, 'precipitation', peakDate),
+        visibility: sampleAt(observer, 'visibility', peakDate),
+        totalCloudCover: sampleAt(observer, 'cloud_cover', peakDate)
+      } : null;
+
       return {
-        lineOfSight: los,
-        clouds: clouds,
-        result: result,
-        rating: rating(result.chance),
-        explanation: explain(result, sun.altitudeDeg),
-        validAt: target,
-        precipitation: valueAt(here, 'precipitation'),
-        visibility: valueAt(here, 'visibility')
+        timeline: timeline,
+        peak: peakEntry,
+        lineOfSight: peakBuilt.los,
+        rating: rating(peakEntry.chance),
+        explanation: explain(
+          { belowHorizon: peakEntry.belowHorizon, perLayer: peakEntry.perLayer, factors: peakEntry.factors },
+          peakEntry.altitudeDeg
+        ),
+        perModel: perModel,
+        spread: spread,
+        conditions: conditions,
+        validAt: peakDate
+      };
+    });
+  }
+
+  /*
+   * Klimatologie aus dem ERA5-Archiv: Wie war die Bewoelkung an diesem Ort, an
+   * diesem Kalendertag, zu dieser Tageszeit, in den vergangenen Jahren?
+   *
+   * Das ist keine Vorhersage, sondern die Haeufigkeitsverteilung der
+   * Vergangenheit - die einzig ehrliche Aussage jenseits der Vorhersagegrenze,
+   * und auch davor ein nuetzlicher Vergleichsmassstab.
+   */
+  function analyseClimatology(place, sun, peakDate, opts) {
+    opts = opts || {};
+    var years = opts.years || 20;
+    var windowDays = opts.windowDays || 3;
+    var onProgress = opts.onProgress;
+
+    if (sun.altitudeDeg <= 0) return Promise.resolve(null);
+
+    var los = lineOfSight(place, sun);
+    var lat = los.map(function (l) { return l.point.lat.toFixed(4); }).join(',');
+    var lon = los.map(function (l) { return l.point.lon.toFixed(4); }).join(',');
+
+    var latest = new Date().getUTCFullYear() - 1; // ERA5 hinkt hinterher
+    var yearList = [];
+    for (var y = latest - years + 1; y <= latest; y++) yearList.push(y);
+
+    var targetHour = peakDate.getUTCHours();
+    var vars = ['cloud_cover_low', 'cloud_cover_mid', 'cloud_cover_high', 'precipitation'];
+    var done = 0;
+    var out = [];
+
+    function oneYear(year) {
+      var center = new Date(Date.UTC(year, peakDate.getUTCMonth(), peakDate.getUTCDate(), targetHour));
+      var url = ARCHIVE_URL + '?latitude=' + lat + '&longitude=' + lon +
+        '&hourly=' + vars.join(',') + '&timezone=UTC' +
+        '&start_date=' + isoDate(new Date(center.getTime() - windowDays * 86400000)) +
+        '&end_date=' + isoDate(new Date(center.getTime() + windowDays * 86400000));
+
+      return fetchJson(url, { signal: opts.signal, retries: 0 }).then(function (data) {
+        var list = Array.isArray(data) ? data : [data];
+        var times = ((list[0] && list[0].hourly && list[0].hourly.time) || [])
+          .map(function (t) { return new Date(t + 'Z'); });
+        var samples = [];
+        times.forEach(function (t, idx) {
+          if (t.getUTCHours() !== targetHour) return;
+          samples.push(list.map(function (entry) {
+            var h = entry.hourly || {};
+            var pick = function (v) {
+              var val = h[v] && h[v][idx];
+              return val === null || val === undefined ? null : val;
+            };
+            return {
+              cloud_cover_low: pick('cloud_cover_low'),
+              cloud_cover_mid: pick('cloud_cover_mid'),
+              cloud_cover_high: pick('cloud_cover_high'),
+              precipitation: pick('precipitation')
+            };
+          }));
+        });
+        return { year: year, samples: samples };
+      }).catch(function () {
+        return { year: year, samples: [] };
+      }).then(function (r) {
+        done++;
+        if (onProgress) onProgress(done, yearList.length);
+        return r;
+      });
+    }
+
+    // Sequenziell in kleinen Gruppen, um den freien Dienst nicht zu ueberfahren.
+    function runBatch(i) {
+      if (i >= yearList.length) return Promise.resolve();
+      var batch = yearList.slice(i, i + 4).map(oneYear);
+      return Promise.all(batch).then(function (rs) {
+        out = out.concat(rs);
+        return runBatch(i + 4);
+      });
+    }
+
+    return runBatch(0).then(function () {
+      var chances = [];
+      var perYear = [];
+      out.sort(function (a, b) { return a.year - b.year; });
+      out.forEach(function (yr) {
+        var ys = [];
+        yr.samples.forEach(function (sample) {
+          var clouds = {};
+          var usable = true;
+          CLOUD_LAYERS.forEach(function (layer, i) {
+            var v = sample[i] && sample[i][layer.variable];
+            if (v === null || v === undefined) usable = false;
+            clouds[layer.key] = v === null || v === undefined ? 0 : v;
+          });
+          if (!usable) return;
+          var prec = (sample[0] && sample[0].precipitation) || 0;
+          var r = visibilityChance(clouds, { sunAltitude: sun.altitudeDeg, precipitation: prec });
+          ys.push(r.chance);
+          chances.push(r.chance);
+        });
+        if (ys.length) {
+          perYear.push({
+            year: yr.year,
+            mean: ys.reduce(function (a, b) { return a + b; }, 0) / ys.length,
+            samples: ys.length
+          });
+        }
+      });
+
+      if (chances.length === 0) return null;
+      var sorted = chances.slice().sort(function (a, b) { return a - b; });
+      function q(p) { return sorted[Math.min(sorted.length - 1, Math.floor(p * sorted.length))]; }
+      return {
+        samples: chances.length,
+        mean: chances.reduce(function (a, b) { return a + b; }, 0) / chances.length,
+        median: q(0.5), p25: q(0.25), p75: q(0.75),
+        goodShare: chances.filter(function (c) { return c > 0.6; }).length / chances.length,
+        perYear: perYear
       };
     });
   }
@@ -324,6 +637,9 @@
 
   global.Visibility = {
     CLOUD_LAYERS: CLOUD_LAYERS,
+    MODELS: MODELS,
+    PRIMARY_MODEL: PRIMARY_MODEL,
+    MAX_FORECAST_DAYS: MAX_FORECAST_DAYS,
     MAX_LINE_OF_SIGHT_KM: MAX_LINE_OF_SIGHT_KM,
     EARTH_RADIUS_KM: EARTH_RADIUS_KM,
     groundDistanceToAltitude: groundDistanceToAltitude,
@@ -333,6 +649,12 @@
     dominantLayer: dominantLayer,
     rating: rating,
     explain: explain,
-    fetchAlongLineOfSight: fetchAlongLineOfSight
+    aggregate: aggregate,
+    sampleAt: sampleAt,
+    fetchForecast: fetchForecast,
+    daysUntil: daysUntil,
+    isForecastable: isForecastable,
+    analyse: analyse,
+    analyseClimatology: analyseClimatology
   };
 })(typeof window !== 'undefined' ? window : this);

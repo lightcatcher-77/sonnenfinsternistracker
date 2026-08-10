@@ -940,3 +940,157 @@ footer a { color: var(--text-dim); }
 }
 
 .vis-err { font-family: var(--mono); font-size: 11px; opacity: 0.8; }
+
+/* --- Sichtprognose: Unterabschnitte --------------------------------- */
+.vis-h3 {
+  margin: 22px 0 10px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+/* Faktoren und Modellvergleich teilen sich dieselbe Balkenzeile */
+.vis-fac { display: grid; gap: 6px; }
+
+.fac-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(60px, 2fr) auto;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+}
+
+.fac-lab { color: var(--text-dim); overflow-wrap: break-word; }
+
+.fac-bar {
+  height: 7px;
+  border-radius: 99px;
+  background: rgba(120, 160, 230, 0.14);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+.fac-bar i {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, rgba(78, 225, 255, 0.55), var(--cyan));
+}
+
+.fac-val {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.fac-row.is-primary .fac-lab { color: var(--text); font-weight: 700; }
+.fac-row.is-primary .fac-bar i {
+  background: linear-gradient(90deg, var(--corona), var(--corona-hot));
+}
+
+.vis-row.is-peak { border-color: rgba(255, 179, 71, 0.5); }
+.vis-row.is-peak .vis-cover { color: var(--corona-hot); }
+.vis-row.is-best { border-color: rgba(67, 232, 160, 0.5); }
+.vis-row.is-best .vis-cover { color: var(--ok); }
+.vis-row em { color: var(--text-faint); font-style: normal; }
+
+.prof-wrap, .tl-wrap, .clima-wrap { margin-top: 12px; }
+#profCanvas, #tlCanvas, #climaCanvas {
+  width: 100%;
+  height: auto;
+  display: block;
+  border-radius: var(--radius-sm);
+  background: rgba(6, 12, 26, 0.45);
+  border: 1px solid var(--border);
+}
+
+.vis-det { margin-top: 10px; }
+.vis-det summary {
+  cursor: pointer;
+  font-size: 11.5px;
+  color: var(--text-faint);
+  margin-bottom: 8px;
+}
+
+/* --- Orte vergleichen ------------------------------------------------ */
+.cmp-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+.cmp-chips:empty { display: none; }
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px 5px 11px;
+  border-radius: 99px;
+  border: 1px solid var(--border);
+  background: rgba(6, 12, 26, 0.5);
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.chip button {
+  background: none;
+  border: none;
+  color: var(--text-faint);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 2px;
+}
+.chip button:hover { color: var(--danger); }
+
+/* --- Live-Ansicht ---------------------------------------------------- */
+.live-state {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 13px;
+  color: var(--text-dim);
+  margin-bottom: 12px;
+}
+
+.live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-faint);
+  flex: none;
+}
+.live-state.is-running { color: var(--corona-hot); font-weight: 600; }
+.live-state.is-running .live-dot {
+  background: var(--danger);
+  box-shadow: 0 0 12px var(--danger);
+  animation: pulse 2s ease-in-out infinite;
+}
+
+.live-bar {
+  height: 8px;
+  border-radius: 99px;
+  background: rgba(120, 160, 230, 0.14);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+.live-bar i {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, rgba(78, 225, 255, 0.5), var(--corona));
+}
+
+.live-next {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+  font-size: 12.5px;
+  color: var(--text-dim);
+}
+.live-next strong { color: var(--text); }
+.live-timer {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--corona-hot);
+  white-space: nowrap;
+}

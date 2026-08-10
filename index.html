@@ -23,22 +23,28 @@
 
 <div class="wrap">
 
-  <header class="top">
-    <p class="eyebrow">Mittwoch · 12. August 2026</p>
-    <h1>Sonnenfinsternis<br>Tracker</h1>
-    <p class="subtitle">Deine Finsternis, auf die Sekunde genau für deinen Standort</p>
-  </header>
+  <!-- Auf breiten Schirmen stehen Titel und Countdown nebeneinander;
+       auf schmalen loest sich .topbar per display:contents wieder auf. -->
+  <div class="topbar">
 
-  <!-- ============ Countdown ============ -->
-  <section class="card countdown-card">
-    <div class="countdown-label" id="cdLabel">Bis zum Beginn an deinem Ort</div>
-    <div class="countdown" id="countdown">
-      <div class="cd-unit"><div class="cd-value" id="cdD">--</div><div class="cd-label">Tage</div></div>
-      <div class="cd-unit"><div class="cd-value" id="cdH">--</div><div class="cd-label">Std</div></div>
-      <div class="cd-unit"><div class="cd-value" id="cdM">--</div><div class="cd-label">Min</div></div>
-      <div class="cd-unit"><div class="cd-value" id="cdS">--</div><div class="cd-label">Sek</div></div>
-    </div>
-  </section>
+    <header class="top">
+      <p class="eyebrow">Mittwoch · 12. August 2026</p>
+      <h1><span>Sonnenfinsternis</span> <span>Tracker</span></h1>
+      <p class="subtitle">Deine Finsternis, auf die Sekunde genau für deinen Standort</p>
+    </header>
+
+    <!-- ============ Countdown ============ -->
+    <section class="card countdown-card">
+      <div class="countdown-label" id="cdLabel">Bis zum Beginn an deinem Ort</div>
+      <div class="countdown" id="countdown">
+        <div class="cd-unit"><div class="cd-value" id="cdD">--</div><div class="cd-label">Tage</div></div>
+        <div class="cd-unit"><div class="cd-value" id="cdH">--</div><div class="cd-label">Std</div></div>
+        <div class="cd-unit"><div class="cd-value" id="cdM">--</div><div class="cd-label">Min</div></div>
+        <div class="cd-unit"><div class="cd-value" id="cdS">--</div><div class="cd-label">Sek</div></div>
+      </div>
+    </section>
+
+  </div>
 
   <!-- ============ Standort ============ -->
   <section class="card">
@@ -72,6 +78,11 @@
   </section>
 
   <div id="resultArea" class="hidden">
+   <!-- Zwei Spalten ab Tablet-Breite. Die Reihenfolge im DOM entspricht
+        genau der Lesereihenfolge auf dem Handy, wo sich .dash* per
+        display:contents auflösen. -->
+   <div class="dash">
+    <div class="dash-main">
 
     <!-- ============ Ergebnis ============ -->
     <div class="verdict" id="verdict">
@@ -112,6 +123,9 @@
       </div>
     </section>
 
+    </div><!-- /.dash-main -->
+    <div class="dash-side">
+
     <!-- ============ Phasen ============ -->
     <section class="card">
       <h2>Ablauf an deinem Ort</h2>
@@ -144,7 +158,12 @@
       </div>
     </section>
 
+    </div><!-- /.dash-side -->
+   </div><!-- /.dash -->
   </div>
+
+  <!-- Die drei Infoblöcke stehen auf breiten Schirmen nebeneinander. -->
+  <div class="extras">
 
   <!-- ============ Beobachtungstipps ============ -->
   <details class="card">
@@ -211,6 +230,8 @@
           Rechnung ein – bei Bergstationen lohnt es sich, sie einzutragen.</li>
     </ul>
   </details>
+
+  </div><!-- /.extras -->
 
   <footer>
     Berechnet nach den Besselschen Elementen der NASA/GSFC · alle Zeiten in der Zeitzone deines Ortes<br>

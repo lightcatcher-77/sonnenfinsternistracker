@@ -3,7 +3,7 @@
  * Wichtig fuer den Finsternistag selbst: draussen auf dem Feld ist das Netz
  * oft ueberlastet, die App muss trotzdem laufen.
  */
-var CACHE = 'sofi2026-v2';
+var CACHE = 'sofi2026-v3';
 
 var ASSETS = [
   './',

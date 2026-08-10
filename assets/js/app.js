@@ -833,7 +833,9 @@
     var canvas = $('horizonCanvas');
     var rect = canvas.getBoundingClientRect();
     var W = rect.width || 340;
-    var H = Math.max(150, Math.min(210, W * 0.5));
+    // Auf breiten Schirmen darf die Himmelsansicht hoeher werden, sonst
+    // bleibt vom Sonnenbogen nur ein flacher Streifen uebrig.
+    var H = Math.max(150, Math.min(260, W * 0.5));
     canvas.style.height = H + 'px';
     if (!W) return;
     var ctx = prepCanvas(canvas, W, H);

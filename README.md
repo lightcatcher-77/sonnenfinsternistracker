@@ -52,10 +52,36 @@ App weist bei solchen Orten ausdrücklich darauf hin.
 
 1. Im Repository auf **Settings → Pages**
 2. Unter *Build and deployment* → *Source*: **Deploy from a branch**
-3. Branch auswählen, Ordner `/ (root)`, **Save**
+3. Branch **`main`**, Ordner `/ (root)`, **Save**
 
 Nach ein bis zwei Minuten ist die Seite unter
 `https://<nutzername>.github.io/sonnenfinsternistracker/` erreichbar.
+
+### Alle Änderungen gehören nach `main`
+
+GitHub Pages baut ausschließlich aus `main`. Was auf einem Feature-Branch
+liegt, ist damit nicht in der App – die Seite liefert weiter den alten Stand,
+auch wenn der Branch längst gepusht ist. Jede Änderung, die wirken soll, muss
+deshalb am Ende in `main` landen:
+
+```sh
+git checkout main
+git merge <branch>
+git push -u origin main
+```
+
+Wird dabei eine Datei aus der Offline-Liste in `sw.js` geändert (HTML, CSS,
+JavaScript, Manifest, Icons), gehört im selben Commit die Cache-Version
+hochgezählt:
+
+```js
+var CACHE = 'sofi2026-v6';   // bei jeder Asset-Änderung +1
+```
+
+Ohne diesen Schritt serviert der Service Worker installierten Nutzern
+weiterhin die alten Dateien aus dem Cache. Bei einer auf dem Homescreen
+installierten PWA kann es trotzdem ein bis zwei Neustarts dauern, bis der
+neue Worker aktiv ist.
 
 ## Aufbau
 

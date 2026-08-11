@@ -505,6 +505,13 @@ input[type="range"]::-moz-range-thumb {
 .mark.is-sunset { color: var(--danger); }
 .mark.is-sunset::before { background: var(--danger); }
 
+.mark.is-clickable {
+  cursor: pointer;
+  padding: 4px 6px;
+  margin: -4px -6px;
+}
+.mark.is-clickable:hover { color: var(--text); }
+
 .slider-controls {
   display: flex;
   gap: 8px;

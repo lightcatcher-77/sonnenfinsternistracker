@@ -627,9 +627,18 @@
       var pct = (m.t - state.tStart) / (state.tEnd - state.tStart) * 100;
       if (pct < 0 || pct > 100) return;
       var d = document.createElement('div');
-      d.className = 'mark ' + m.cls;
+      d.className = 'mark ' + m.cls + ' is-clickable';
       d.style.left = pct + '%';
       d.textContent = m.label;
+      // Anklickbar, damit man z.B. exakt den Sonnenuntergang trifft statt
+      // sich beim Ziehen des Reglers nur anzunaehern.
+      d.addEventListener('click', function () {
+        state.live = false;
+        stopPlay();
+        setSliderT(m.t);
+        renderDynamic();
+        updateModeButtons();
+      });
       wrap.appendChild(d);
     });
   }
@@ -1483,6 +1492,17 @@
       // Horizontlinie verschwunden als der Text den Sonnenuntergang meldet.
       var refractionDeg = -EC.SUNSET_ALT_DEG - sunDiameterDeg / 2;
       var horizonY = cy + (altPx + refractionDeg) * pxPerDeg;
+      // Einmal ganz untergegangen, bleibt die Linie an der Scheibenoberkante
+      // stehen, statt weiter "aufzusteigen": sonst wuerde ein Regler-Wert
+      // kurz nach dem exakten Sonnenuntergang eine zunehmend grosse Luecke
+      // zwischen Scheibe und Horizontlinie zeigen, die wie ein Fehler
+      // aussieht, obwohl die Scheibe schon vollstaendig verschwunden ist.
+      // Nur fuer einen echten Untergang: vor einem Aufgang (sunriseDuring)
+      // bedeutet dieselbe tiefe Hoehe "die Sonne ist noch nicht da", das
+      // darf nicht ebenfalls an die Scheibenoberkante geklemmt werden.
+      if (state.circ && state.circ.sunsetDuring) {
+        horizonY = Math.max(horizonY, cy - R);
+      }
       if (horizonY < H + R) {
         var hg = ctx.createLinearGradient(0, horizonY - 30, 0, H);
         hg.addColorStop(0, 'rgba(20,14,40,0)');

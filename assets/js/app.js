@@ -1547,23 +1547,29 @@
     function X(az) { return padL + (az - azMin) / (azMax - azMin) * (W - padL - padR); }
     function Y(alt) { return H - padB - (alt - altMin) / (altMax - altMin) * (H - padT - padB); }
 
+    // Der gezeichnete "Boden" markiert denselben Schwellenwert wie der Text
+    // "Sonnenuntergang" und die Sonnenscheibe im Zeitreise-Panel (EC.SUNSET_ALT_DEG,
+    // -0.833° wahre Hoehe = Refraktion + Sonnenradius), nicht die geometrische
+    // Horizontlinie bei 0°.
+    var yHorizon = Y(EC.SUNSET_ALT_DEG);
+
     // Himmel
-    var sky = ctx.createLinearGradient(0, padT, 0, Y(0));
+    var sky = ctx.createLinearGradient(0, padT, 0, yHorizon);
     sky.addColorStop(0, 'rgba(30,45,90,0.55)');
     sky.addColorStop(0.6, 'rgba(70,50,90,0.5)');
     sky.addColorStop(1, 'rgba(140,70,60,0.45)');
     ctx.fillStyle = sky;
-    ctx.fillRect(0, padT, W, Y(0) - padT);
+    ctx.fillRect(0, padT, W, yHorizon - padT);
 
     // Boden
     ctx.fillStyle = 'rgba(6,8,16,0.92)';
-    ctx.fillRect(0, Y(0), W, H - Y(0));
+    ctx.fillRect(0, yHorizon, W, H - yHorizon);
 
     // Horizontlinie
     ctx.strokeStyle = 'rgba(255,150,90,0.55)';
     ctx.lineWidth = 1.5;
     ctx.beginPath();
-    ctx.moveTo(0, Y(0)); ctx.lineTo(W, Y(0)); ctx.stroke();
+    ctx.moveTo(0, yHorizon); ctx.lineTo(W, yHorizon); ctx.stroke();
 
     // Hoehenlinien
     ctx.font = '9px ' + getComputedStyle(document.body).fontFamily;
@@ -1586,10 +1592,10 @@
       ctx.strokeStyle = 'rgba(120,160,230,0.18)';
       ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.moveTo(x, Y(0)); ctx.lineTo(x, Y(0) + 5); ctx.stroke();
+      ctx.moveTo(x, yHorizon); ctx.lineTo(x, yHorizon + 5); ctx.stroke();
       ctx.fillStyle = 'rgba(150,175,215,0.6)';
       ctx.font = '9px ' + fam;
-      ctx.fillText(Math.round(az) + '°', x, Y(0) + 16);
+      ctx.fillText(Math.round(az) + '°', x, yHorizon + 16);
     }
 
     // ... und die Kompassnamen an den echten Kompasspunkten (alle 22,5 Grad)
@@ -1601,10 +1607,10 @@
       ctx.strokeStyle = 'rgba(180,205,245,0.4)';
       ctx.lineWidth = 1.5;
       ctx.beginPath();
-      ctx.moveTo(cxp, Y(0)); ctx.lineTo(cxp, Y(0) + 9); ctx.stroke();
+      ctx.moveTo(cxp, yHorizon); ctx.lineTo(cxp, yHorizon + 9); ctx.stroke();
       ctx.fillStyle = 'rgba(200,220,255,0.95)';
       ctx.font = '700 11px ' + fam;
-      ctx.fillText(COMPASS[((ci % 16) + 16) % 16], cxp, Y(0) + 24);
+      ctx.fillText(COMPASS[((ci % 16) + 16) % 16], cxp, yHorizon + 24);
     }
 
     // Sonnenbahn C1 -> C4

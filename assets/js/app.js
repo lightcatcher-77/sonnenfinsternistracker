@@ -493,7 +493,7 @@
 
       var sub = '';
       if (r.alt !== undefined && r.alt !== null) {
-        sub = r.alt < -0.833
+        sub = r.alt < EC.SUNSET_ALT_DEG
           ? '↓ unter dem Horizont'
           : fmtDeg(r.alt) + ' hoch · ' + compassName(r.az);
       }
@@ -1474,8 +1474,15 @@
     var altPx = s.altitudeDeg;
     if (altPx < 6) {
       // Massstab: scheinbarer Sonnendurchmesser ~0.53 Grad
-      var pxPerDeg = (2 * R) / 0.53;
-      var horizonY = cy + altPx * pxPerDeg;
+      var sunDiameterDeg = 0.53;
+      var pxPerDeg = (2 * R) / sunDiameterDeg;
+      // s.altitudeDeg ist die wahre (unrefraktierte) Hoehe des Sonnenmittelpunkts.
+      // Der Text "Sonnenuntergang" meldet sich erst bei EC.SUNSET_ALT_DEG (-0.833°),
+      // weil Refraktion die Scheibe am Horizont noch anhebt. Ohne diesen Ausgleich
+      // waere die gezeichnete Scheibe schon deutlich frueher komplett hinter der
+      // Horizontlinie verschwunden als der Text den Sonnenuntergang meldet.
+      var refractionDeg = -EC.SUNSET_ALT_DEG - sunDiameterDeg / 2;
+      var horizonY = cy + (altPx + refractionDeg) * pxPerDeg;
       if (horizonY < H + R) {
         var hg = ctx.createLinearGradient(0, horizonY - 30, 0, H);
         hg.addColorStop(0, 'rgba(20,14,40,0)');

@@ -15,6 +15,11 @@
   var DEG = Math.PI / 180;
   var RAD = 180 / Math.PI;
 
+  // Standard-Sonnenhoehe fuer "Auf-/Untergang": Refraktion am Horizont
+  // (~34') plus scheinbarer Sonnenradius (~16'). Gilt fuer die wahre
+  // (unrefraktierte) Sonnenhoehe des Mittelpunkts, wie sie stateAt() liefert.
+  var SUNSET_ALT_DEG = -0.833;
+
   /* ------------------------------------------------------------------
    * Besselsche Elemente: Totale Sonnenfinsternis 2026 August 12
    * Quelle: NASA/GSFC Five Millennium Canon of Solar Eclipses (Espenak/Meeus)
@@ -304,7 +309,7 @@
    * Beruecksichtigt Refraktion und Halbmesser (-0.833 Grad Standard).
    */
   function findHorizonCrossing(el, obs, tA, tB) {
-    var H0 = -0.833;
+    var H0 = SUNSET_ALT_DEG;
     var fa = stateAt(el, obs, tA).altitudeDeg - H0;
     var fb = stateAt(el, obs, tB).altitudeDeg - H0;
     if (fa * fb > 0) return null;
@@ -355,7 +360,7 @@
       durationPartialS: 0,
       sunsetDuring: null,
       sunriseDuring: null,
-      belowHorizonAtMax: sMax.altitudeDeg < -0.833
+      belowHorizonAtMax: sMax.altitudeDeg < SUNSET_ALT_DEG
     };
 
     // Findet ueberhaupt eine Finsternis statt?
@@ -438,6 +443,7 @@
     dateToT: dateToT,
     findHorizonCrossing: findHorizonCrossing,
     circleOverlapFraction: circleOverlapFraction,
+    SUNSET_ALT_DEG: SUNSET_ALT_DEG,
     DEG: DEG,
     RAD: RAD
   };

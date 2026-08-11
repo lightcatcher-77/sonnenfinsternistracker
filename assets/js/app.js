@@ -1642,18 +1642,32 @@
     });
 
     // Aktuelle Sonnenposition
+    // Die Hoehenskala hier ist wegen des grossen Winkelbereichs (C1 bis C4)
+    // viel staerker gestaucht als im Zeitreise-Panel. Ein fest 16px grosser
+    // Glow waere darin schon mehrere Grad vor dem eigentlichen
+    // Sonnenuntergang sichtbar auf dem Boden - und liesse die Sonne hier
+    // faelschlich frueher untergehen als im Zeitreise-Panel. Der Radius wird
+    // deshalb auf den Pixelabstand zur Horizontlinie begrenzt: der Punkt
+    // schrumpft beim Naehern und verschwindet exakt bei EC.SUNSET_ALT_DEG,
+    // im selben Moment, in dem dort die Sonnenscheibe ganz untergeht.
     var sx = X(sNow.azimuthDeg), sy = Y(sNow.altitudeDeg);
-    var glow = ctx.createRadialGradient(sx, sy, 1, sx, sy, 16);
-    glow.addColorStop(0, 'rgba(255,220,150,0.9)');
-    glow.addColorStop(1, 'rgba(255,180,80,0)');
-    ctx.fillStyle = glow;
-    ctx.beginPath(); ctx.arc(sx, sy, 16, 0, Math.PI * 2); ctx.fill();
+    var distToHorizonPx = yHorizon - sy;
+    if (distToHorizonPx > 0) {
+      var glowR = Math.min(16, distToHorizonPx);
+      var dotR = Math.min(5.5, distToHorizonPx);
 
-    ctx.fillStyle = '#fff2cf';
-    ctx.beginPath(); ctx.arc(sx, sy, 5.5, 0, Math.PI * 2); ctx.fill();
-    ctx.strokeStyle = 'rgba(255,255,255,0.8)';
-    ctx.lineWidth = 1;
-    ctx.stroke();
+      var glow = ctx.createRadialGradient(sx, sy, 1, sx, sy, glowR);
+      glow.addColorStop(0, 'rgba(255,220,150,0.9)');
+      glow.addColorStop(1, 'rgba(255,180,80,0)');
+      ctx.fillStyle = glow;
+      ctx.beginPath(); ctx.arc(sx, sy, glowR, 0, Math.PI * 2); ctx.fill();
+
+      ctx.fillStyle = '#fff2cf';
+      ctx.beginPath(); ctx.arc(sx, sy, dotR, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = 'rgba(255,255,255,0.8)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
   }
 
   /* ==================================================================

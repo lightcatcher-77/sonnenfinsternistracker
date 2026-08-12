@@ -507,8 +507,14 @@ input[type="range"]::-moz-range-thumb {
 
 .mark.is-clickable {
   cursor: pointer;
-  padding: 4px 6px;
-  margin: -4px -6px;
+}
+/* Vergroessert die Trefferflaeche zum Antippen, ohne die Position der Marke
+   zu veraendern (Padding/Margin auf .mark selbst wuerde die per JS anhand
+   der Thumb-Breite berechnete "left"-Position verschieben). */
+.mark.is-clickable::after {
+  content: "";
+  position: absolute;
+  inset: -4px -6px;
 }
 .mark.is-clickable:hover { color: var(--text); }
 

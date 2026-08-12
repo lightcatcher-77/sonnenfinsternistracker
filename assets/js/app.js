@@ -11,6 +11,10 @@
   // Startort beim ersten Aufruf, solange nichts gespeichert ist
   var DEFAULT_CITY = 'Füssen';
 
+  // Radius des Schieberegler-Thumbs (siehe input[type="range"]::-webkit-slider-thumb
+  // in style.css), fuer die Positionierung der Marken auf der Leiste
+  var THUMB_RADIUS = 13;
+
   var state = {
     place: null,       // {name, lat, lon, height, tz, source}
     circ: null,        // oertliche Umstaende
@@ -628,7 +632,11 @@
       if (pct < 0 || pct > 100) return;
       var d = document.createElement('div');
       d.className = 'mark ' + m.cls + ' is-clickable';
-      d.style.left = pct + '%';
+      // Der Schieberegler-Thumb ist 26px breit, daher liegt seine Mitte nicht
+      // linear bei pct% der Breite, sondern ist an den Raendern um den
+      // Thumb-Radius nach innen versetzt. Ohne diese Korrektur wandern die
+      // Marken (v.a. C1 nahe am linken Rand) sichtbar am Thumb vorbei.
+      d.style.left = 'calc(' + THUMB_RADIUS + 'px + (100% - ' + (THUMB_RADIUS * 2) + 'px) * ' + (pct / 100) + ')';
       d.textContent = m.label;
       // Anklickbar, damit man z.B. exakt den Sonnenuntergang trifft statt
       // sich beim Ziehen des Reglers nur anzunaehern.
